@@ -11,6 +11,7 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { roleHomeMap } from "@/lib/permissions";
 import { toNumber } from "@/lib/utils";
 
@@ -929,10 +930,10 @@ export async function getInvoicePreview(invoiceId: string) {
   });
 }
 
-export async function getDemoUsers() {
+export async function getUserDirectory() {
   return prisma.user.findMany({
     include: { staff: true },
-    orderBy: { role: "asc" }
+    orderBy: [{ role: "asc" }, { fullName: "asc" }]
   });
 }
 
@@ -942,11 +943,86 @@ export async function authenticate(email: string, password: string) {
     include: { staff: true }
   });
 
-  if (!user || user.password !== password || !user.isActive) {
+  if (!user || !user.isActive) {
     return null;
   }
 
+  const passwordCheck = await verifyPassword(password, user.password);
+
+  if (!passwordCheck.valid) {
+    return null;
+  }
+
+  if (passwordCheck.needsUpgrade) {
+    const upgradedPassword = await hashPassword(password);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: upgradedPassword }
+    });
+
+    user.password = upgradedPassword;
+  }
+
   return user;
+}
+
+export async function createManagedUserAccount(input: {
+  adminUserId: string;
+  email: string;
+  fullName: string;
+  password: string;
+  role: RoleKey;
+  employeeCode?: string;
+  department: string;
+  title: string;
+  branch: string;
+  phone: string;
+  monthlySalary: number;
+  employmentStartDate: Date;
+  employmentStatus?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const employeeCode =
+      input.employeeCode && input.employeeCode.trim().length > 0
+        ? input.employeeCode.trim().toUpperCase()
+        : `EMP-${String((await tx.staff.count()) + 1).padStart(3, "0")}`;
+
+    const user = await tx.user.create({
+      data: {
+        email: input.email.trim().toLowerCase(),
+        fullName: input.fullName.trim(),
+        password: await hashPassword(input.password),
+        role: input.role
+      }
+    });
+
+    const staff = await tx.staff.create({
+      data: {
+        userId: user.id,
+        employeeCode,
+        department: input.department.trim(),
+        title: input.title.trim(),
+        branch: input.branch.trim(),
+        phone: input.phone.trim(),
+        employmentStatus: input.employmentStatus?.trim() || "Active",
+        employmentStartDate: input.employmentStartDate,
+        monthlySalary: money(input.monthlySalary),
+        roleLabel: input.role
+      }
+    });
+
+    await addAudit(
+      tx,
+      input.adminUserId,
+      "CREATE_USER_ACCOUNT",
+      "User",
+      user.id,
+      `Created ${input.role.toLowerCase()} account for ${user.fullName} (${staff.employeeCode}).`
+    );
+
+    return { user, staff };
+  });
 }
 
 export { roleHomeMap };

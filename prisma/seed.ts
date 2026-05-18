@@ -10,6 +10,7 @@ import {
   PrismaClient,
   RoleKey
 } from "@prisma/client";
+import { hashPassword } from "../lib/passwords";
 
 const prisma = new PrismaClient();
 
@@ -105,12 +106,22 @@ async function main() {
   await prisma.user.deleteMany();
   await prisma.setting.deleteMany();
 
+  const seededPasswords = await Promise.all([
+    hashPassword("admin123"),
+    hashPassword("sales123"),
+    hashPassword("warehouse123"),
+    hashPassword("delivery123"),
+    hashPassword("hr123"),
+    hashPassword("finance123"),
+    hashPassword("manager123")
+  ]);
+
   const users = await Promise.all([
     prisma.user.create({
       data: {
         email: "admin@phoneflow.co.ke",
         fullName: "Mercy Njeri",
-        password: "admin123",
+        password: seededPasswords[0],
         role: RoleKey.ADMIN
       }
     }),
@@ -118,7 +129,7 @@ async function main() {
       data: {
         email: "sales@phoneflow.co.ke",
         fullName: "Kevin Mutua",
-        password: "sales123",
+        password: seededPasswords[1],
         role: RoleKey.SALES
       }
     }),
@@ -126,7 +137,7 @@ async function main() {
       data: {
         email: "warehouse@phoneflow.co.ke",
         fullName: "Brian Wekesa",
-        password: "warehouse123",
+        password: seededPasswords[2],
         role: RoleKey.WAREHOUSE
       }
     }),
@@ -134,7 +145,7 @@ async function main() {
       data: {
         email: "delivery@phoneflow.co.ke",
         fullName: "Jane Atieno",
-        password: "delivery123",
+        password: seededPasswords[3],
         role: RoleKey.DELIVERY
       }
     }),
@@ -142,7 +153,7 @@ async function main() {
       data: {
         email: "hr@phoneflow.co.ke",
         fullName: "Esther Waithera",
-        password: "hr123",
+        password: seededPasswords[4],
         role: RoleKey.HR
       }
     }),
@@ -150,7 +161,7 @@ async function main() {
       data: {
         email: "finance@phoneflow.co.ke",
         fullName: "Samuel Kiptoo",
-        password: "finance123",
+        password: seededPasswords[5],
         role: RoleKey.FINANCE
       }
     }),
@@ -158,7 +169,7 @@ async function main() {
       data: {
         email: "manager@phoneflow.co.ke",
         fullName: "Paul Otieno",
-        password: "manager123",
+        password: seededPasswords[6],
         role: RoleKey.MANAGER
       }
     })

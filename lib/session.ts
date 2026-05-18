@@ -14,10 +14,16 @@ export async function getSessionUser() {
     return null;
   }
 
-  return prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { email },
     include: { staff: true }
   });
+
+  if (!user?.isActive) {
+    return null;
+  }
+
+  return user;
 }
 
 export async function requireSessionUser() {

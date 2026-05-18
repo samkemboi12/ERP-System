@@ -1,9 +1,10 @@
 "use server";
 
-import { MovementType, type RoleKey } from "@prisma/client";
+import { MovementType, Prisma, type RoleKey } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { z } from "zod";
 
 import { roleHomeMap } from "@/lib/permissions";
 import {
@@ -12,6 +13,7 @@ import {
   authenticate,
   completeDelivery,
   confirmOrder,
+  createManagedUserAccount,
   createCustomer,
   createDelivery,
   createOrder,
@@ -21,6 +23,21 @@ import {
   startDelivery
 } from "@/lib/services";
 import { requireSessionUser, sessionCookieName } from "@/lib/session";
+
+const createAccountSchema = z.object({
+  fullName: z.string().trim().min(3, "Full name is required."),
+  email: z.string().trim().email("A valid email is required."),
+  password: z.string().min(10, "Temporary password must be at least 10 characters."),
+  role: z.enum(["ADMIN", "SALES", "WAREHOUSE", "DELIVERY", "HR", "FINANCE", "MANAGER"]),
+  employeeCode: z.string().trim().optional(),
+  department: z.string().trim().min(2, "Department is required."),
+  title: z.string().trim().min(2, "Job title is required."),
+  branch: z.string().trim().min(2, "Branch is required."),
+  phone: z.string().trim().min(7, "Phone number is required."),
+  monthlySalary: z.coerce.number().min(0, "Salary cannot be negative."),
+  employmentStartDate: z.string().trim().min(1, "Start date is required."),
+  employmentStatus: z.string().trim().optional()
+});
 
 function assertRole(role: RoleKey, allowed: RoleKey[]) {
   if (!allowed.includes(role)) {
@@ -40,7 +57,9 @@ export async function loginAction(formData: FormData) {
   const cookieStore = await cookies();
   cookieStore.set(sessionCookieName(), user.email, {
     httpOnly: true,
-    path: "/"
+    path: "/",
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production"
   });
 
   redirect(roleHomeMap[user.role]);
@@ -227,4 +246,50 @@ export async function completeDeliveryAction(formData: FormData) {
   revalidatePath("/orders");
   revalidatePath("/communications");
   revalidatePath("/");
+}
+
+export async function createManagedUserAccountAction(formData: FormData) {
+  const adminUser = await requireSessionUser();
+  assertRole(adminUser.role, ["ADMIN"]);
+
+  const payload = {
+    fullName: String(formData.get("fullName") ?? ""),
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    role: String(formData.get("role") ?? "") as RoleKey,
+    employeeCode: String(formData.get("employeeCode") ?? ""),
+    department: String(formData.get("department") ?? ""),
+    title: String(formData.get("title") ?? ""),
+    branch: String(formData.get("branch") ?? ""),
+    phone: String(formData.get("phone") ?? ""),
+    monthlySalary: Number(formData.get("monthlySalary") ?? 0),
+    employmentStartDate: String(formData.get("employmentStartDate") ?? ""),
+    employmentStatus: String(formData.get("employmentStatus") ?? "Active")
+  };
+
+  const parsed = createAccountSchema.safeParse(payload);
+
+  if (!parsed.success) {
+    redirect(`/settings?userError=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Unable to create account.")}`);
+  }
+
+  try {
+    await createManagedUserAccount({
+      adminUserId: adminUser.id,
+      ...parsed.data,
+      employmentStartDate: new Date(parsed.data.employmentStartDate)
+    });
+  } catch (error) {
+    const message =
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+        ? "That email address or employee code is already in use."
+        : error instanceof Error
+          ? error.message
+          : "Unable to create account.";
+    redirect(`/settings?userError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/staff");
+  redirect("/settings?userCreated=1");
 }

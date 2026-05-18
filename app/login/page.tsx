@@ -2,15 +2,12 @@ import Link from "next/link";
 
 import { Input, SubmitButton } from "@/components/ui";
 import { loginAction } from "@/lib/actions";
-import { getDemoUsers } from "@/lib/services";
-import { slugLabel } from "@/lib/utils";
 
 export default async function LoginPage({
   searchParams
 }: {
   searchParams?: Promise<{ error?: string }>;
 }) {
-  const users = await getDemoUsers();
   const params = await searchParams;
 
   return (
@@ -24,14 +21,20 @@ export default async function LoginPage({
           </p>
 
           <div className="mt-10 grid gap-4 md:grid-cols-2">
-            {users.map((user) => (
-              <div key={user.id} className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-sky-200">{slugLabel(user.role)}</p>
-                <p className="mt-2 font-medium">{user.fullName}</p>
-                <p className="text-sm text-slate-300">{user.email}</p>
-                <p className="mt-3 text-xs text-slate-400">Password: {user.password}</p>
-              </div>
-            ))}
+            <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-sky-200">Access model</p>
+              <p className="mt-2 font-medium">One ERP, role-limited workspaces</p>
+              <p className="mt-3 text-sm text-slate-300">
+                Sales, warehouse, finance, HR, management, and drivers all sign in through one secure portal and only see the workflows assigned to them.
+              </p>
+            </div>
+            <div className="rounded-[1.75rem] border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.2em] text-sky-200">Account security</p>
+              <p className="mt-2 font-medium">Credentials are issued by admin</p>
+              <p className="mt-3 text-sm text-slate-300">
+                If you need an account or a password reset, contact your ERP administrator. Demo passwords are not displayed in production.
+              </p>
+            </div>
           </div>
         </section>
 
@@ -51,11 +54,11 @@ export default async function LoginPage({
           <form action={loginAction} className="mt-8 space-y-4">
             <div>
               <label htmlFor="email">Email</label>
-              <Input id="email" name="email" placeholder="sales@phoneflow.co.ke" required type="email" />
+              <Input id="email" name="email" placeholder="name@yourcompany.com" required type="email" />
             </div>
             <div>
               <label htmlFor="password">Password</label>
-              <Input id="password" name="password" placeholder="sales123" required type="password" />
+              <Input id="password" name="password" placeholder="Enter your password" required type="password" />
             </div>
             <SubmitButton>Sign in</SubmitButton>
           </form>
