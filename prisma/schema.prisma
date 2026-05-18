@@ -1,0 +1,445 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum RoleKey {
+  ADMIN
+  SALES
+  WAREHOUSE
+  DELIVERY
+  HR
+  FINANCE
+  MANAGER
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  INVOICED
+  PACKED
+  DISPATCHED
+  DELIVERED
+  CLOSED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+}
+
+enum MovementType {
+  PURCHASE_IN
+  MANUAL_ADJUSTMENT_IN
+  MANUAL_ADJUSTMENT_OUT
+  SALES_RESERVATION
+  DELIVERY_DISPATCH
+  DELIVERY_CONFIRMED
+  RETURN_IN
+  DAMAGED_OUT
+}
+
+enum CommissionRuleType {
+  PERCENT
+  FIXED
+  TIERED
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  CALCULATED
+  APPROVED
+  FINALIZED
+}
+
+enum CommunicationDirection {
+  OUTBOUND
+  INTERNAL
+  INBOUND
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  fullName     String
+  password     String
+  role         RoleKey
+  isActive     Boolean     @default(true)
+  staff        Staff?
+  auditLogs    AuditLog[]
+  orders       Order[]     @relation("OrderCreator")
+  invoices     Invoice[]   @relation("InvoiceCreator")
+  deliveries   Delivery[]  @relation("DeliveryCreator")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Staff {
+  id                    String            @id @default(cuid())
+  userId                String?           @unique
+  employeeCode          String            @unique
+  department            String
+  title                 String
+  branch                String
+  phone                 String
+  employmentStatus      String
+  employmentStartDate   DateTime
+  monthlySalary         Decimal           @db.Decimal(12, 2)
+  supervisorId          String?
+  bankName              String?
+  bankAccount           String?
+  payrollNumber         String?
+  roleLabel             String
+  user                  User?             @relation(fields: [userId], references: [id])
+  supervisor            Staff?            @relation("StaffSupervisor", fields: [supervisorId], references: [id])
+  directReports         Staff[]           @relation("StaffSupervisor")
+  assignedDeliveries    Delivery[]        @relation("AssignedDriver")
+  commissions           Commission[]
+  payrollItems          PayrollItem[]
+  appraisals            Appraisal[]
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+}
+
+model Customer {
+  id              String               @id @default(cuid())
+  code            String               @unique
+  name            String
+  segment         String
+  industry        String               @default("Retail")
+  email           String?
+  phone           String
+  taxId           String?
+  creditLimit     Decimal              @db.Decimal(12, 2)
+  overdueBalance  Decimal              @db.Decimal(12, 2)
+  city            String
+  address         String
+  notes           String?
+  contacts        CustomerContact[]
+  orders          Order[]
+  invoices        Invoice[]
+  communications  CommunicationLog[]
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+model CustomerContact {
+  id          String   @id @default(cuid())
+  customerId  String
+  name        String
+  role        String
+  phone       String
+  email       String?
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+model ProductCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  products    Product[]
+}
+
+model Product {
+  id                String              @id @default(cuid())
+  sku               String              @unique
+  name              String
+  brand             String
+  model             String
+  description       String
+  categoryId        String
+  unitPrice         Decimal             @db.Decimal(12, 2)
+  taxRate           Decimal             @db.Decimal(5, 2)
+  reorderLevel      Int
+  stockOnHand       Int
+  reservedStock     Int                 @default(0)
+  imeiTracked       Boolean             @default(false)
+  attributesJson    String?
+  category          ProductCategory     @relation(fields: [categoryId], references: [id])
+  orderItems        OrderItem[]
+  invoiceItems      InvoiceItem[]
+  deliveryItems     DeliveryItem[]
+  inventoryMoves    InventoryMovement[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model InventoryMovement {
+  id            String       @id @default(cuid())
+  productId     String
+  type          MovementType
+  quantity      Int
+  reference     String
+  note          String?
+  createdById   String?
+  createdAt     DateTime     @default(now())
+  product       Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id                 String             @id @default(cuid())
+  orderNumber        String             @unique
+  customerId         String
+  createdById        String
+  status             OrderStatus
+  currency           String             @default("KES")
+  subtotal           Decimal            @db.Decimal(12, 2)
+  taxTotal           Decimal            @db.Decimal(12, 2)
+  discountTotal      Decimal            @db.Decimal(12, 2)
+  deliveryFee        Decimal            @db.Decimal(12, 2)
+  grandTotal         Decimal            @db.Decimal(12, 2)
+  expectedDeliveryAt DateTime?
+  notes              String?
+  customer           Customer           @relation(fields: [customerId], references: [id])
+  createdBy          User               @relation("OrderCreator", fields: [createdById], references: [id])
+  items              OrderItem[]
+  invoices           Invoice[]
+  deliveries         Delivery[]
+  communications     CommunicationLog[] @relation("OrderCommunications")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  productId    String
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  discount     Decimal  @db.Decimal(12, 2)
+  taxRate      Decimal  @db.Decimal(5, 2)
+  lineTotal    Decimal  @db.Decimal(12, 2)
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+}
+
+model Invoice {
+  id             String             @id @default(cuid())
+  invoiceNumber  String             @unique
+  orderId        String?
+  customerId     String
+  createdById    String
+  status         InvoiceStatus
+  issueDate      DateTime
+  dueDate        DateTime
+  currency       String             @default("KES")
+  subtotal       Decimal            @db.Decimal(12, 2)
+  taxTotal       Decimal            @db.Decimal(12, 2)
+  discountTotal  Decimal            @db.Decimal(12, 2)
+  deliveryFee    Decimal            @db.Decimal(12, 2)
+  grandTotal     Decimal            @db.Decimal(12, 2)
+  paidAmount     Decimal            @db.Decimal(12, 2)
+  notes          String?
+  order          Order?             @relation(fields: [orderId], references: [id])
+  customer       Customer           @relation(fields: [customerId], references: [id])
+  createdBy      User               @relation("InvoiceCreator", fields: [createdById], references: [id])
+  items          InvoiceItem[]
+  payments       Payment[]
+  deliveries     Delivery[]
+  communications CommunicationLog[] @relation("InvoiceCommunications")
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+model InvoiceItem {
+  id           String   @id @default(cuid())
+  invoiceId    String
+  productId    String
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(12, 2)
+  taxRate      Decimal  @db.Decimal(5, 2)
+  lineTotal    Decimal  @db.Decimal(12, 2)
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id            String    @id @default(cuid())
+  invoiceId      String
+  amount         Decimal   @db.Decimal(12, 2)
+  method         String
+  reference      String
+  note           String?
+  receivedAt     DateTime
+  invoice        Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+}
+
+model Delivery {
+  id                 String             @id @default(cuid())
+  deliveryNumber     String             @unique
+  orderId            String?
+  invoiceId          String?
+  assignedDriverId   String?
+  createdById        String
+  status             DeliveryStatus
+  dispatchDate       DateTime?
+  deliveredAt        DateTime?
+  destination        String
+  customerName       String
+  customerPhone      String
+  trackingNotes      String?
+  order              Order?             @relation(fields: [orderId], references: [id])
+  invoice            Invoice?           @relation(fields: [invoiceId], references: [id])
+  assignedDriver     Staff?             @relation("AssignedDriver", fields: [assignedDriverId], references: [id])
+  createdBy          User               @relation("DeliveryCreator", fields: [createdById], references: [id])
+  items              DeliveryItem[]
+  proofOfDelivery    ProofOfDelivery?
+  communications     CommunicationLog[] @relation("DeliveryCommunications")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model DeliveryItem {
+  id          String    @id @default(cuid())
+  deliveryId  String
+  productId   String
+  quantity    Int
+  delivery    Delivery  @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id])
+}
+
+model ProofOfDelivery {
+  id            String    @id @default(cuid())
+  deliveryId    String    @unique
+  recipientName String
+  signatureText String
+  location      String?
+  deliveredAt   DateTime
+  notes         String?
+  delivery      Delivery  @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+}
+
+model CommunicationTemplate {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  channel       String
+  triggerEvent  String
+  subject       String?
+  body          String
+}
+
+model CommunicationLog {
+  id               String                 @id @default(cuid())
+  customerId       String?
+  orderId          String?
+  invoiceId        String?
+  deliveryId       String?
+  channel          String
+  direction        CommunicationDirection @default(OUTBOUND)
+  eventType        String
+  templateName     String?
+  subject          String?
+  body             String
+  recipientName    String?
+  recipientContact String?
+  status           String
+  sentAt           DateTime
+  createdAt        DateTime               @default(now())
+  customer         Customer?              @relation(fields: [customerId], references: [id])
+  order            Order?                 @relation("OrderCommunications", fields: [orderId], references: [id])
+  invoice          Invoice?               @relation("InvoiceCommunications", fields: [invoiceId], references: [id])
+  delivery         Delivery?              @relation("DeliveryCommunications", fields: [deliveryId], references: [id])
+}
+
+model CommissionRule {
+  id            String             @id @default(cuid())
+  name          String
+  roleLabel     String
+  type          CommissionRuleType
+  value         Decimal            @db.Decimal(8, 2)
+  active        Boolean            @default(true)
+  createdAt     DateTime           @default(now())
+}
+
+model Commission {
+  id             String    @id @default(cuid())
+  staffId        String
+  invoiceId      String?
+  periodLabel    String
+  amount         Decimal   @db.Decimal(12, 2)
+  basis          String
+  staff          Staff     @relation(fields: [staffId], references: [id])
+  createdAt      DateTime  @default(now())
+}
+
+model PayrollRun {
+  id            String            @id @default(cuid())
+  label         String            @unique
+  periodStart   DateTime
+  periodEnd     DateTime
+  status        PayrollRunStatus
+  totalGross    Decimal           @db.Decimal(12, 2)
+  totalNet      Decimal           @db.Decimal(12, 2)
+  items         PayrollItem[]
+  createdAt     DateTime          @default(now())
+}
+
+model PayrollItem {
+  id              String      @id @default(cuid())
+  payrollRunId    String
+  staffId         String
+  basicSalary     Decimal     @db.Decimal(12, 2)
+  allowance       Decimal     @db.Decimal(12, 2)
+  commission      Decimal     @db.Decimal(12, 2)
+  grossPay        Decimal     @db.Decimal(12, 2)
+  taxablePay      Decimal     @db.Decimal(12, 2)
+  paye            Decimal     @db.Decimal(12, 2)
+  shif            Decimal     @db.Decimal(12, 2)
+  nssfEmployee    Decimal     @db.Decimal(12, 2)
+  housingLevy     Decimal     @db.Decimal(12, 2)
+  otherDeductions Decimal     @db.Decimal(12, 2)
+  totalDeductions Decimal     @db.Decimal(12, 2)
+  netPay          Decimal     @db.Decimal(12, 2)
+  payrollRun      PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  staff           Staff       @relation(fields: [staffId], references: [id])
+}
+
+model Appraisal {
+  id              String   @id @default(cuid())
+  staffId          String
+  reviewPeriod     String
+  score            Int
+  strengths        String
+  improvementArea  String
+  managerFeedback  String
+  staff            Staff    @relation(fields: [staffId], references: [id])
+  createdAt        DateTime @default(now())
+}
+
+model AuditLog {
+  id           String    @id @default(cuid())
+  userId        String?
+  action        String
+  entityType    String
+  entityId      String
+  detail        String
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id])
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
