@@ -37,15 +37,11 @@ On this machine, the local PostgreSQL user that worked was:
 - host: `localhost`
 - port: `5432`
 
-## Demo accounts
+## Initial access
 
-- `admin@phoneflow.co.ke` / `admin123`
-- `sales@phoneflow.co.ke` / `sales123`
-- `warehouse@phoneflow.co.ke` / `warehouse123`
-- `delivery@phoneflow.co.ke` / `delivery123`
-- `hr@phoneflow.co.ke` / `hr123`
-- `finance@phoneflow.co.ke` / `finance123`
-- `manager@phoneflow.co.ke` / `manager123`
+- For a fresh production database, open `/setup/admin` and create the first real admin account.
+- The bootstrap page only works while there are no user accounts in the system.
+- Sample credentials only exist if you intentionally run the seed script in a non-production environment.
 
 ## Run locally
 
@@ -97,6 +93,7 @@ Open `http://localhost:3000`.
 - `/staff` HR and appraisal view
 - `/reports` management and finance reports
 - `/settings` admin-only controls
+- `/setup/admin` one-time production bootstrap for the first admin account
 
 ## API endpoints included
 
@@ -118,9 +115,11 @@ Open `http://localhost:3000`.
 ## Notes
 
 - The current authentication is demo-grade for internal testing.
+- Passwords are stored as secure hashes and legacy plaintext records auto-upgrade on successful login.
 - Department access is restricted in both UI navigation and route access.
 - Stock is deducted at dispatch in the current workflow.
 - Payroll deductions are implemented as a functional sample using current Kenya payroll concepts and seeded rates.
+- HR or Admin can submit the latest payroll run to Finance for salary disbursement from `/payroll`, and the handoff is logged internally.
 - For Vercel + Supabase rollout, use [DEPLOYMENT_GUIDE.md](C:/Users/samwel/OneDrive/Desktop/ERP/DEPLOYMENT_GUIDE.md).
 
 ## Verified locally

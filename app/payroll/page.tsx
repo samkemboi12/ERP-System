@@ -1,16 +1,28 @@
 import { AppShell } from "@/components/shell";
-import { Section, Table } from "@/components/ui";
+import { Input, Section, SubmitButton, Table, Textarea } from "@/components/ui";
+import { submitPayrollToFinanceAction } from "@/lib/actions";
 import { getPayrollData } from "@/lib/services";
 import { requireRouteAccess } from "@/lib/session";
-import { formatCurrency, formatDate, slugLabel } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, slugLabel } from "@/lib/utils";
 
-export default async function PayrollPage() {
+export default async function PayrollPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ submitted?: string }>;
+}) {
   const user = await requireRouteAccess("/payroll");
-  const { latestRun, runs } = await getPayrollData();
+  const [{ latestRun, latestSubmission, runs }, params] = await Promise.all([getPayrollData(), searchParams]);
+  const canSubmitToFinance = user.role === "ADMIN" || user.role === "HR";
 
   return (
     <AppShell user={{ fullName: user.fullName, role: slugLabel(user.role), roleKey: user.role }}>
       <div className="grid gap-6">
+        {params?.submitted ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            HR has submitted the payroll run to Finance for salary disbursement. Finance can now work from the approved figures.
+          </div>
+        ) : null}
+
         <Section
           eyebrow="Payroll"
           title="Functional payroll with statutory deductions"
@@ -49,6 +61,51 @@ export default async function PayrollPage() {
             </Table>
           ) : null}
         </Section>
+
+        {latestRun ? (
+          <Section
+            eyebrow="Month end handoff"
+            title="HR to finance salary dispatch"
+            description="Yes. HR can formally send the approved salary figures to Finance from here, and the system records the handoff in the communication log."
+          >
+            <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <p className="text-sm text-slate-500">Latest run</p>
+                <p className="mt-2 text-xl font-semibold text-ink">{latestRun.label}</p>
+                <p className="mt-3 text-sm text-slate-600">
+                  Status: <span className="font-medium">{slugLabel(latestRun.status)}</span>
+                </p>
+                <p className="mt-2 text-sm text-slate-600">Gross payroll: {formatCurrency(Number(latestRun.totalGross))}</p>
+                <p className="mt-2 text-sm text-slate-600">Net payroll: {formatCurrency(Number(latestRun.totalNet))}</p>
+                <p className="mt-2 text-sm text-slate-600">Payroll lines: {latestRun.items.length}</p>
+                <p className="mt-4 text-sm text-slate-500">
+                  {latestSubmission
+                    ? `Last handoff recorded on ${formatDateTime(latestSubmission.sentAt)}.`
+                    : "No payroll handoff has been recorded yet for Finance."}
+                </p>
+              </div>
+
+              {canSubmitToFinance ? (
+                <form action={submitPayrollToFinanceAction} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5">
+                  <Input name="payrollRunId" type="hidden" value={latestRun.id} />
+                  <div>
+                    <label htmlFor="note">Finance handoff note</label>
+                    <Textarea
+                      id="note"
+                      name="note"
+                      placeholder="Share any month-end notes for Finance, such as bank file timing, holds, or final approval remarks."
+                    />
+                  </div>
+                  <SubmitButton>Send payroll to Finance</SubmitButton>
+                </form>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600">
+                  HR or Admin submits the payroll here. Finance receives the approved run through the shared payroll status and the internal communication log.
+                </div>
+              )}
+            </div>
+          </Section>
+        ) : null}
 
         <Section eyebrow="Run history" title="Payroll runs">
           <Table>

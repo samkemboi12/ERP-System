@@ -273,7 +273,12 @@ export async function getPayrollData() {
   ]);
 
   const latestRun = runs[0] ?? null;
-  return { runs, latestRun, staff };
+  const latestSubmission = await prisma.communicationLog.findFirst({
+    where: { eventType: "PAYROLL_SUBMITTED_TO_FINANCE" },
+    orderBy: { sentAt: "desc" }
+  });
+
+  return { runs, latestRun, latestSubmission, staff };
 }
 
 export async function getCommunicationFeed() {
@@ -937,6 +942,11 @@ export async function getUserDirectory() {
   });
 }
 
+export async function hasAnyUserAccounts() {
+  const count = await prisma.user.count();
+  return count > 0;
+}
+
 export async function authenticate(email: string, password: string) {
   const user = await prisma.user.findUnique({
     where: { email },
@@ -965,6 +975,59 @@ export async function authenticate(email: string, password: string) {
   }
 
   return user;
+}
+
+export async function bootstrapInitialAdminAccount(input: {
+  fullName: string;
+  email: string;
+  password: string;
+  employeeCode?: string;
+  phone: string;
+  branch: string;
+}) {
+  const userCount = await prisma.user.count();
+
+  if (userCount > 0) {
+    throw new Error("Admin bootstrap is no longer available because the system already has active accounts.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email: input.email.trim().toLowerCase(),
+        fullName: input.fullName.trim(),
+        password: await hashPassword(input.password),
+        role: "ADMIN"
+      }
+    });
+
+    const staff = await tx.staff.create({
+      data: {
+        userId: user.id,
+        employeeCode: input.employeeCode?.trim().toUpperCase() || "EMP-001",
+        department: "Management",
+        title: "System Administrator",
+        branch: input.branch.trim(),
+        phone: input.phone.trim(),
+        employmentStatus: "Active",
+        employmentStartDate: new Date(),
+        monthlySalary: money(0),
+        roleLabel: "ADMIN"
+      }
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "BOOTSTRAP_ADMIN",
+        entityType: "User",
+        entityId: user.id,
+        detail: `Initial admin account created for ${user.fullName}.`
+      }
+    });
+
+    return { user, staff };
+  });
 }
 
 export async function createManagedUserAccount(input: {
@@ -1022,6 +1085,60 @@ export async function createManagedUserAccount(input: {
     );
 
     return { user, staff };
+  });
+}
+
+export async function submitPayrollToFinance(input: {
+  payrollRunId: string;
+  submittedByUserId: string;
+  note?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const [run, hrUser, financeUsers] = await Promise.all([
+      tx.payrollRun.findUniqueOrThrow({
+        where: { id: input.payrollRunId },
+        include: {
+          items: {
+            include: { staff: true }
+          }
+        }
+      }),
+      tx.user.findUniqueOrThrow({ where: { id: input.submittedByUserId } }),
+      tx.user.findMany({ where: { role: "FINANCE", isActive: true } })
+    ]);
+
+    const updatedRun = await tx.payrollRun.update({
+      where: { id: input.payrollRunId },
+      data: { status: PayrollRunStatus.APPROVED }
+    });
+
+    const financeRecipients = financeUsers.length > 0 ? financeUsers.map((user) => user.email).join(", ") : "Finance team";
+    const lineCount = run.items.length;
+
+    await addCommunication(tx, {
+      channel: "Internal",
+      direction: CommunicationDirection.INTERNAL,
+      eventType: "PAYROLL_SUBMITTED_TO_FINANCE",
+      templateName: "Payroll Handoff",
+      subject: `${run.label} submitted to finance`,
+      recipientName: "Finance Department",
+      recipientContact: financeRecipients,
+      body:
+        input.note?.trim() ||
+        `${hrUser.fullName} submitted ${run.label} to Finance for salary disbursement. ${lineCount} employee payroll lines are ready for payment processing.`,
+      status: "Shared"
+    });
+
+    await addAudit(
+      tx,
+      input.submittedByUserId,
+      "SUBMIT_PAYROLL_TO_FINANCE",
+      "PayrollRun",
+      updatedRun.id,
+      `Submitted payroll run ${run.label} to Finance for disbursement.`
+    );
+
+    return updatedRun;
   });
 }
 

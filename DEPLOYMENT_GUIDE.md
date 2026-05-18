@@ -109,8 +109,9 @@ Trigger the first deployment from Vercel.
 If the deployment succeeds:
 
 1. Open the live URL.
-2. Log in with a seeded user.
-3. Confirm:
+2. If this is a fresh production database, visit `/setup/admin` and create the first admin account.
+3. Log in with that admin account.
+4. Confirm:
    customers load
    invoices preview
    payroll page works
@@ -127,6 +128,11 @@ npx prisma db seed
 ```
 
 For a real go-live, replace demo data with your own imports.
+
+Important:
+
+- The current seed script clears existing tables before loading sample data.
+- Do not run the seed script against a live production database unless you explicitly want to replace its contents.
 
 ## 10. Before real operations
 

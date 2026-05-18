@@ -2,13 +2,14 @@ import Link from "next/link";
 
 import { Input, SubmitButton } from "@/components/ui";
 import { loginAction } from "@/lib/actions";
+import { hasAnyUserAccounts } from "@/lib/services";
 
 export default async function LoginPage({
   searchParams
 }: {
-  searchParams?: Promise<{ error?: string }>;
+  searchParams?: Promise<{ error?: string; bootstrapped?: string }>;
 }) {
-  const params = await searchParams;
+  const [params, hasUsers] = await Promise.all([searchParams, hasAnyUserAccounts()]);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,#fefce8_0%,#f8fafc_55%,#dbeafe_100%)] px-4 py-12">
@@ -44,6 +45,18 @@ export default async function LoginPage({
           <p className="mt-3 text-sm text-slate-500">
             Finance, HR, warehouse, sales, management, and delivery teams each land in the parts of the system they are allowed to use.
           </p>
+
+          {!hasUsers ? (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              No user accounts exist yet. <Link className="font-medium text-amber-800" href="/setup/admin">Create the first admin account</Link>.
+            </div>
+          ) : null}
+
+          {params?.bootstrapped ? (
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              Your first admin account is ready. Sign in below using the credentials you just created.
+            </div>
+          ) : null}
 
           {params?.error ? (
             <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">

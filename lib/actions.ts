@@ -11,6 +11,7 @@ import {
   addInventoryMovement,
   assignDelivery,
   authenticate,
+  bootstrapInitialAdminAccount,
   completeDelivery,
   confirmOrder,
   createManagedUserAccount,
@@ -20,6 +21,7 @@ import {
   createProduct,
   generateInvoiceForOrder,
   recordPayment,
+  submitPayrollToFinance,
   startDelivery
 } from "@/lib/services";
 import { requireSessionUser, sessionCookieName } from "@/lib/session";
@@ -37,6 +39,15 @@ const createAccountSchema = z.object({
   monthlySalary: z.coerce.number().min(0, "Salary cannot be negative."),
   employmentStartDate: z.string().trim().min(1, "Start date is required."),
   employmentStatus: z.string().trim().optional()
+});
+
+const bootstrapAdminSchema = z.object({
+  fullName: z.string().trim().min(3, "Admin name is required."),
+  email: z.string().trim().email("A valid admin email is required."),
+  password: z.string().min(10, "Admin password must be at least 10 characters."),
+  employeeCode: z.string().trim().optional(),
+  phone: z.string().trim().min(7, "Phone number is required."),
+  branch: z.string().trim().min(2, "Branch is required.")
 });
 
 function assertRole(role: RoleKey, allowed: RoleKey[]) {
@@ -292,4 +303,52 @@ export async function createManagedUserAccountAction(formData: FormData) {
   revalidatePath("/settings");
   revalidatePath("/staff");
   redirect("/settings?userCreated=1");
+}
+
+export async function bootstrapInitialAdminAction(formData: FormData) {
+  const payload = {
+    fullName: String(formData.get("fullName") ?? ""),
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    employeeCode: String(formData.get("employeeCode") ?? ""),
+    phone: String(formData.get("phone") ?? ""),
+    branch: String(formData.get("branch") ?? "")
+  };
+
+  const parsed = bootstrapAdminSchema.safeParse(payload);
+
+  if (!parsed.success) {
+    redirect(`/setup/admin?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Unable to create admin account.")}`);
+  }
+
+  try {
+    await bootstrapInitialAdminAccount(parsed.data);
+  } catch (error) {
+    const message =
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+        ? "That email address or employee code is already in use."
+        : error instanceof Error
+          ? error.message
+          : "Unable to create admin account.";
+    redirect(`/setup/admin?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/login");
+  redirect("/login?bootstrapped=1");
+}
+
+export async function submitPayrollToFinanceAction(formData: FormData) {
+  const user = await requireSessionUser();
+  assertRole(user.role, ["ADMIN", "HR"]);
+
+  await submitPayrollToFinance({
+    payrollRunId: String(formData.get("payrollRunId") ?? ""),
+    submittedByUserId: user.id,
+    note: String(formData.get("note") ?? "")
+  });
+
+  revalidatePath("/payroll");
+  revalidatePath("/communications");
+  revalidatePath("/reports");
+  redirect("/payroll?submitted=1");
 }
