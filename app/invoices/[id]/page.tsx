@@ -1,3 +1,4 @@
+import { DownloadInvoiceButton } from "@/components/download-invoice-button";
 import Link from "next/link";
 
 import { PrintButton } from "@/components/print-button";
@@ -20,10 +21,14 @@ export default async function InvoicePreviewPage({ params }: { params: Promise<{
           <Link className="text-sm font-medium text-sky-700" href="/invoices">
             Back to invoices
           </Link>
-          <PrintButton />
+          <div className="flex flex-wrap gap-3">
+            <DownloadInvoiceButton invoiceNumber={invoice.invoiceNumber} />
+            <PrintButton />
+          </div>
         </div>
 
-        <Section eyebrow="Invoice preview" title={invoice.invoiceNumber}>
+        <div id="invoice-download-root">
+          <Section eyebrow="Invoice preview" title={invoice.invoiceNumber}>
           <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
             <div className="rounded-2xl bg-slate-50 p-5">
               <p className="text-sm text-slate-500">Bill to</p>
@@ -52,11 +57,15 @@ export default async function InvoicePreviewPage({ params }: { params: Promise<{
                   <span>{invoice.order?.orderNumber ?? "Direct invoice"}</span>
                 </div>
               </div>
+              </div>
             </div>
-          </div>
-        </Section>
+          </Section>
 
-        <Section eyebrow="Breakdown" title="Itemized amount preview">
+          <Section
+            eyebrow="Breakdown"
+            title="Itemized amount preview"
+            description="This invoice preview shows exactly what Finance and the customer see: product lines, tax rate, subtotal, discount, delivery fee, grand total, paid amount, and outstanding balance."
+          >
           <Table>
             <table>
               <thead>
@@ -112,7 +121,8 @@ export default async function InvoicePreviewPage({ params }: { params: Promise<{
               <span>{formatCurrency(balance)}</span>
             </div>
           </div>
-        </Section>
+          </Section>
+        </div>
       </div>
     </AppShell>
   );

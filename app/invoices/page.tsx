@@ -15,6 +15,11 @@ export default async function InvoicesPage() {
     <AppShell user={{ fullName: user.fullName, role: slugLabel(user.role), roleKey: user.role }}>
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <Section eyebrow="Billing" title="Invoice control and payment tracking">
+          {invoices.length === 0 ? (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No invoices exist yet. Create an order, confirm it, then generate an invoice from the Orders page, or load starter examples from Settings.
+            </div>
+          ) : null}
           <Table>
             <table>
               <thead>
@@ -55,6 +60,9 @@ export default async function InvoicesPage() {
         </Section>
 
         <Section eyebrow="Cash application" title="Record invoice payment">
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            Finance uses this section to receive a customer payment, post the amount, keep the invoice breakdown intact, and update the outstanding balance.
+          </div>
           <form action={recordPaymentAction} className="space-y-4">
             <div>
               <label htmlFor="invoiceId">Invoice</label>

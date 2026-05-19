@@ -71,6 +71,7 @@ In Vercel project settings, add:
 - `DATABASE_URL`
 - `DIRECT_URL`
 - `NODE_ENV=production`
+- `SESSION_SECRET`
 
 Later you should also add:
 
@@ -79,6 +80,8 @@ Later you should also add:
 - SMS provider secrets
 
 Apply them to `Production`.
+
+For `SESSION_SECRET`, use a long random value and keep it private. This is used to sign ERP session cookies.
 
 ## 7. Configure build and migration flow
 
@@ -138,8 +141,9 @@ Important:
 
 Do these next:
 
-- replace demo passwords
-- hash passwords with `argon2`
+- create the first real admin from `/setup/admin`
+- set strong unique passwords for all real users
+- set `SESSION_SECRET` in Vercel
 - add real email provider
 - add real SMS provider
 - load real staff
@@ -148,6 +152,7 @@ Do these next:
 - set your real invoice numbering policy
 - enable backups in Supabase
 - test each department role
+- review Admin, Finance, and HR access monthly from `Settings`
 
 ## 11. Go-live rollout
 

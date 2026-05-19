@@ -10,6 +10,12 @@ export default async function LoginPage({
   searchParams?: Promise<{ error?: string; bootstrapped?: string }>;
 }) {
   const [params, hasUsers] = await Promise.all([searchParams, hasAnyUserAccounts()]);
+  const errorMessage =
+    params?.error === "locked"
+      ? "Too many failed login attempts. This account is temporarily locked for 15 minutes."
+      : params?.error
+        ? "Email or password was not recognized."
+        : null;
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,#fefce8_0%,#f8fafc_55%,#dbeafe_100%)] px-4 py-12">
@@ -58,11 +64,7 @@ export default async function LoginPage({
             </div>
           ) : null}
 
-          {params?.error ? (
-            <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
-              Email or password was not recognized.
-            </div>
-          ) : null}
+          {errorMessage ? <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">{errorMessage}</div> : null}
 
           <form action={loginAction} className="mt-8 space-y-4">
             <div>

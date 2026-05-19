@@ -9,22 +9,29 @@ import { z } from "zod";
 import { roleHomeMap } from "@/lib/permissions";
 import {
   addInventoryMovement,
+  adminResetUserPassword,
   assignDelivery,
   authenticate,
   bootstrapInitialAdminAccount,
+  changeUserPassword,
   completeDelivery,
   confirmOrder,
   createManagedUserAccount,
+  createProductCategory,
   createCustomer,
   createDelivery,
   createOrder,
   createProduct,
   generateInvoiceForOrder,
+  recordPrivilegedAccessReview,
   recordPayment,
+  populateStarterOperationalData,
+  retireSampleAccounts,
+  setUserActiveState,
   submitPayrollToFinance,
   startDelivery
 } from "@/lib/services";
-import { requireSessionUser, sessionCookieName } from "@/lib/session";
+import { createSessionForUser, destroyCurrentSession, destroyUserSessions, requireSessionContext, requireSessionUser, sessionCookieName } from "@/lib/session";
 
 const createAccountSchema = z.object({
   fullName: z.string().trim().min(3, "Full name is required."),
@@ -50,6 +57,39 @@ const bootstrapAdminSchema = z.object({
   branch: z.string().trim().min(2, "Branch is required.")
 });
 
+const createCategorySchema = z.object({
+  name: z.string().trim().min(2, "Category name is required."),
+  description: z.string().trim().optional()
+});
+
+const passwordChangeSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required."),
+    newPassword: z
+      .string()
+      .min(12, "New password must be at least 12 characters.")
+      .regex(/[A-Z]/, "New password must include an uppercase letter.")
+      .regex(/[a-z]/, "New password must include a lowercase letter.")
+      .regex(/[0-9]/, "New password must include a number.")
+      .regex(/[^A-Za-z0-9]/, "New password must include a symbol."),
+    confirmPassword: z.string().min(1, "Confirm the new password.")
+  })
+  .refine((value) => value.newPassword === value.confirmPassword, {
+    message: "New password and confirmation do not match.",
+    path: ["confirmPassword"]
+  });
+
+const adminResetPasswordSchema = z.object({
+  userId: z.string().trim().min(1),
+  newPassword: z
+    .string()
+    .min(12, "Temporary password must be at least 12 characters.")
+    .regex(/[A-Z]/, "Temporary password must include an uppercase letter.")
+    .regex(/[a-z]/, "Temporary password must include a lowercase letter.")
+    .regex(/[0-9]/, "Temporary password must include a number.")
+    .regex(/[^A-Za-z0-9]/, "Temporary password must include a symbol.")
+});
+
 function assertRole(role: RoleKey, allowed: RoleKey[]) {
   if (!allowed.includes(role)) {
     redirect(roleHomeMap[role]);
@@ -59,26 +99,35 @@ function assertRole(role: RoleKey, allowed: RoleKey[]) {
 export async function loginAction(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
-  const user = await authenticate(email, password);
+  const result = await authenticate(email, password);
 
-  if (!user) {
+  if (result.status === "invalid") {
     redirect("/login?error=invalid");
   }
 
+  if (result.status === "locked") {
+    redirect(`/login?error=${encodeURIComponent("locked")}`);
+  }
+
+  const cookieValue = await createSessionForUser(result.user.id);
+
   const cookieStore = await cookies();
-  cookieStore.set(sessionCookieName(), user.email, {
+  cookieStore.set(sessionCookieName(), cookieValue, {
     httpOnly: true,
     path: "/",
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production"
   });
 
-  redirect(roleHomeMap[user.role]);
+  if (result.status === "must_change_password") {
+    redirect("/account/security?required=1");
+  }
+
+  redirect(roleHomeMap[result.user.role]);
 }
 
 export async function logoutAction() {
-  const cookieStore = await cookies();
-  cookieStore.delete(sessionCookieName());
+  await destroyCurrentSession();
   redirect("/login");
 }
 
@@ -119,6 +168,35 @@ export async function createProductAction(formData: FormData) {
 
   revalidatePath("/products");
   revalidatePath("/");
+}
+
+export async function createProductCategoryAction(formData: FormData) {
+  const user = await requireSessionUser();
+  assertRole(user.role, ["ADMIN", "WAREHOUSE", "MANAGER"]);
+
+  const parsed = createCategorySchema.safeParse({
+    name: String(formData.get("name") ?? ""),
+    description: String(formData.get("description") ?? "")
+  });
+
+  if (!parsed.success) {
+    redirect(`/products?categoryError=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Unable to create category.")}`);
+  }
+
+  try {
+    await createProductCategory(parsed.data);
+  } catch (error) {
+    const message =
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002"
+        ? "That category already exists."
+        : error instanceof Error
+          ? error.message
+          : "Unable to create category.";
+    redirect(`/products?categoryError=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/products");
+  redirect("/products?categoryCreated=1");
 }
 
 export async function addInventoryMovementAction(formData: FormData) {
@@ -303,6 +381,125 @@ export async function createManagedUserAccountAction(formData: FormData) {
   revalidatePath("/settings");
   revalidatePath("/staff");
   redirect("/settings?userCreated=1");
+}
+
+export async function changeOwnPasswordAction(formData: FormData) {
+  const session = await requireSessionContext();
+  const payload = {
+    currentPassword: String(formData.get("currentPassword") ?? ""),
+    newPassword: String(formData.get("newPassword") ?? ""),
+    confirmPassword: String(formData.get("confirmPassword") ?? "")
+  };
+
+  const parsed = passwordChangeSchema.safeParse(payload);
+
+  if (!parsed.success) {
+    redirect(`/account/security?error=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Unable to change password.")}`);
+  }
+
+  try {
+    await changeUserPassword({
+      userId: session.user.id,
+      currentPassword: parsed.data.currentPassword,
+      newPassword: parsed.data.newPassword
+    });
+
+    await destroyUserSessions(session.user.id, session.id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to change password.";
+    redirect(`/account/security?error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/account/security");
+  redirect("/account/security?changed=1");
+}
+
+export async function adminResetUserPasswordAction(formData: FormData) {
+  const session = await requireSessionContext();
+  assertRole(session.user.role, ["ADMIN"]);
+
+  const parsed = adminResetPasswordSchema.safeParse({
+    userId: String(formData.get("userId") ?? ""),
+    newPassword: String(formData.get("newPassword") ?? "")
+  });
+
+  if (!parsed.success) {
+    redirect(`/settings?userError=${encodeURIComponent(parsed.error.issues[0]?.message ?? "Unable to reset password.")}`);
+  }
+
+  await adminResetUserPassword({
+    adminUserId: session.user.id,
+    userId: parsed.data.userId,
+    newPassword: parsed.data.newPassword
+  });
+
+  revalidatePath("/settings");
+  redirect("/settings?userReset=1");
+}
+
+export async function toggleUserActiveStateAction(formData: FormData) {
+  const session = await requireSessionContext();
+  assertRole(session.user.role, ["ADMIN"]);
+
+  const userId = String(formData.get("userId") ?? "");
+  const nextState = String(formData.get("nextState") ?? "") === "active";
+
+  if (!userId || userId === session.user.id) {
+    redirect("/settings?userError=You cannot deactivate your own current admin session.");
+  }
+
+  await setUserActiveState({
+    adminUserId: session.user.id,
+    userId,
+    isActive: nextState
+  });
+
+  revalidatePath("/settings");
+  redirect(`/settings?${nextState ? "userReactivated" : "userDeactivated"}=1`);
+}
+
+export async function retireSampleAccountsAction() {
+  const session = await requireSessionContext();
+  assertRole(session.user.role, ["ADMIN"]);
+
+  const retiredCount = await retireSampleAccounts({
+    adminUserId: session.user.id,
+    excludeUserId: session.user.id
+  });
+
+  revalidatePath("/settings");
+  redirect(`/settings?retired=${retiredCount}`);
+}
+
+export async function recordPrivilegedAccessReviewAction() {
+  const session = await requireSessionContext();
+  assertRole(session.user.role, ["ADMIN"]);
+
+  await recordPrivilegedAccessReview({
+    adminUserId: session.user.id,
+    reviewerName: session.user.fullName
+  });
+
+  revalidatePath("/settings");
+  redirect("/settings?reviewed=1");
+}
+
+export async function populateStarterOperationalDataAction() {
+  const session = await requireSessionContext();
+  assertRole(session.user.role, ["ADMIN"]);
+
+  await populateStarterOperationalData({ userId: session.user.id });
+
+  revalidatePath("/");
+  revalidatePath("/products");
+  revalidatePath("/orders");
+  revalidatePath("/invoices");
+  revalidatePath("/deliveries");
+  revalidatePath("/payroll");
+  revalidatePath("/communications");
+  revalidatePath("/finance");
+  revalidatePath("/settings");
+  redirect("/settings?starterLoaded=1");
 }
 
 export async function bootstrapInitialAdminAction(formData: FormData) {

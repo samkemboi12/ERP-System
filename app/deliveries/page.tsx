@@ -29,7 +29,7 @@ export default async function DeliveriesPage() {
                 </thead>
                 <tbody>
                   {deliveries.map((delivery) => (
-                    <tr key={delivery.id}>
+                  <tr key={delivery.id}>
                       <td>
                         <div className="font-medium">{delivery.deliveryNumber}</div>
                         <div className="text-xs text-slate-400">{delivery.destination}</div>
@@ -37,7 +37,18 @@ export default async function DeliveriesPage() {
                       <td>{delivery.customerName}</td>
                       <td>{delivery.assignedDriver?.title ?? "Unassigned"}</td>
                       <td>{slugLabel(delivery.status)}</td>
-                      <td>{delivery.proofOfDelivery ? formatDateTime(delivery.proofOfDelivery.deliveredAt) : "Pending"}</td>
+                      <td>
+                        {delivery.proofOfDelivery ? (
+                          <div>
+                            <div>{formatDateTime(delivery.proofOfDelivery.deliveredAt)}</div>
+                            <div className="text-xs text-slate-400">
+                              {delivery.proofOfDelivery.recipientName} signed as {delivery.proofOfDelivery.signatureText}
+                            </div>
+                          </div>
+                        ) : (
+                          "Pending"
+                        )}
+                      </td>
                       <td>
                         <div className="flex flex-col gap-2">
                           <form action={assignDeliveryAction}>

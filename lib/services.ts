@@ -16,6 +16,17 @@ import { roleHomeMap } from "@/lib/permissions";
 import { toNumber } from "@/lib/utils";
 
 const money = (value: number) => new Prisma.Decimal(value.toFixed(2));
+const LOGIN_ATTEMPT_LIMIT = 5;
+const LOGIN_LOCK_MINUTES = 15;
+const SAMPLE_ACCOUNT_EMAILS = [
+  "admin@phoneflow.co.ke",
+  "sales@phoneflow.co.ke",
+  "warehouse@phoneflow.co.ke",
+  "delivery@phoneflow.co.ke",
+  "hr@phoneflow.co.ke",
+  "finance@phoneflow.co.ke",
+  "manager@phoneflow.co.ke"
+] as const;
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -263,6 +274,42 @@ export async function getReportsData() {
   };
 }
 
+export async function getFinanceHubData() {
+  const [invoices, payments, payrollRuns, communications] = await Promise.all([
+    prisma.invoice.findMany({
+      include: { customer: true, order: true, payments: true },
+      orderBy: { createdAt: "desc" },
+      take: 8
+    }),
+    prisma.payment.findMany({
+      include: { invoice: { include: { customer: true } } },
+      orderBy: { receivedAt: "desc" },
+      take: 8
+    }),
+    prisma.payrollRun.findMany({
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
+      take: 4
+    }),
+    prisma.communicationLog.findMany({
+      where: {
+        eventType: {
+          in: ["PAYROLL_SUBMITTED_TO_FINANCE", "INVOICE_ISSUED", "PAYMENT_RECORDED"]
+        }
+      },
+      orderBy: { sentAt: "desc" },
+      take: 8
+    })
+  ]);
+
+  return {
+    invoices,
+    payments,
+    payrollRuns,
+    communications
+  };
+}
+
 export async function getPayrollData() {
   const [runs, staff] = await Promise.all([
     prisma.payrollRun.findMany({
@@ -344,6 +391,15 @@ export async function createProduct(input: {
       reorderLevel: input.reorderLevel,
       stockOnHand: input.stockOnHand,
       imeiTracked: true
+    }
+  });
+}
+
+export async function createProductCategory(input: { name: string; description?: string }) {
+  return prisma.productCategory.create({
+    data: {
+      name: input.name.trim(),
+      description: input.description?.trim() || null
     }
   });
 }
@@ -922,6 +978,31 @@ export async function getCollections() {
   };
 }
 
+export async function getSecurityReviewData() {
+  const [users, settings] = await Promise.all([
+    prisma.user.findMany({
+      include: { staff: true },
+      orderBy: [{ role: "asc" }, { fullName: "asc" }]
+    }),
+    prisma.setting.findMany({
+      where: {
+        key: {
+          in: ["security.lastPrivilegedAccessReviewAt", "security.lastPrivilegedAccessReviewBy"]
+        }
+      }
+    })
+  ]);
+
+  const settingsMap = new Map(settings.map((setting) => [setting.key, setting.value]));
+
+  return {
+    privilegedUsers: users.filter((user) => ["ADMIN", "FINANCE", "HR"].includes(user.role)),
+    sampleUsers: users.filter((user) => SAMPLE_ACCOUNT_EMAILS.includes(user.email as (typeof SAMPLE_ACCOUNT_EMAILS)[number])),
+    lastReviewedAt: settingsMap.get("security.lastPrivilegedAccessReviewAt") ?? null,
+    lastReviewedBy: settingsMap.get("security.lastPrivilegedAccessReviewBy") ?? null
+  };
+}
+
 export async function getInvoicePreview(invoiceId: string) {
   return prisma.invoice.findUniqueOrThrow({
     where: { id: invoiceId },
@@ -948,33 +1029,68 @@ export async function hasAnyUserAccounts() {
 }
 
 export async function authenticate(email: string, password: string) {
+  const normalizedEmail = email.trim().toLowerCase();
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: { email: normalizedEmail },
     include: { staff: true }
   });
 
   if (!user || !user.isActive) {
-    return null;
+    return { status: "invalid" as const };
+  }
+
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    return {
+      status: "locked" as const,
+      lockedUntil: user.lockedUntil
+    };
   }
 
   const passwordCheck = await verifyPassword(password, user.password);
 
   if (!passwordCheck.valid) {
-    return null;
-  }
-
-  if (passwordCheck.needsUpgrade) {
-    const upgradedPassword = await hashPassword(password);
+    const nextFailedAttempts = user.failedLoginAttempts + 1;
+    const shouldLock = nextFailedAttempts >= LOGIN_ATTEMPT_LIMIT;
+    const lockedUntil = shouldLock ? new Date(Date.now() + LOGIN_LOCK_MINUTES * 60 * 1000) : null;
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { password: upgradedPassword }
+      data: {
+        failedLoginAttempts: shouldLock ? 0 : nextFailedAttempts,
+        lockedUntil
+      }
     });
 
-    user.password = upgradedPassword;
+    return shouldLock
+      ? {
+          status: "locked" as const,
+          lockedUntil
+        }
+      : { status: "invalid" as const };
   }
 
-  return user;
+  const updatedPassword = passwordCheck.needsUpgrade ? await hashPassword(password) : user.password;
+
+  const refreshedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: updatedPassword,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      lastLoginAt: new Date(),
+      ...(passwordCheck.needsUpgrade && !user.passwordChangedAt ? { passwordChangedAt: new Date() } : {})
+    },
+    include: { staff: true }
+  });
+
+  if (passwordCheck.needsUpgrade) {
+    refreshedUser.password = updatedPassword;
+  }
+
+  return {
+    status: refreshedUser.mustChangePassword ? ("must_change_password" as const) : ("success" as const),
+    user: refreshedUser
+  };
 }
 
 export async function bootstrapInitialAdminAccount(input: {
@@ -997,7 +1113,8 @@ export async function bootstrapInitialAdminAccount(input: {
         email: input.email.trim().toLowerCase(),
         fullName: input.fullName.trim(),
         password: await hashPassword(input.password),
-        role: "ADMIN"
+        role: "ADMIN",
+        passwordChangedAt: new Date()
       }
     });
 
@@ -1056,7 +1173,8 @@ export async function createManagedUserAccount(input: {
         email: input.email.trim().toLowerCase(),
         fullName: input.fullName.trim(),
         password: await hashPassword(input.password),
-        role: input.role
+        role: input.role,
+        mustChangePassword: true
       }
     });
 
@@ -1085,6 +1203,181 @@ export async function createManagedUserAccount(input: {
     );
 
     return { user, staff };
+  });
+}
+
+export async function changeUserPassword(input: {
+  userId: string;
+  currentPassword: string;
+  newPassword: string;
+}) {
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: input.userId }
+  });
+
+  const passwordCheck = await verifyPassword(input.currentPassword, user.password);
+
+  if (!passwordCheck.valid) {
+    throw new Error("Current password is incorrect.");
+  }
+
+  if (input.currentPassword === input.newPassword) {
+    throw new Error("Choose a new password that is different from the current one.");
+  }
+
+  await prisma.user.update({
+    where: { id: input.userId },
+    data: {
+      password: await hashPassword(input.newPassword),
+      mustChangePassword: false,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      passwordChangedAt: new Date()
+    }
+  });
+}
+
+export async function adminResetUserPassword(input: {
+  adminUserId: string;
+  userId: string;
+  newPassword: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({
+      where: { id: input.userId },
+      data: {
+        password: await hashPassword(input.newPassword),
+        mustChangePassword: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        passwordChangedAt: new Date()
+      }
+    });
+
+    await tx.session.deleteMany({
+      where: { userId: input.userId }
+    });
+
+    await addAudit(
+      tx,
+      input.adminUserId,
+      "RESET_USER_PASSWORD",
+      "User",
+      user.id,
+      `Reset password for ${user.fullName} and required a password change on next login.`
+    );
+
+    return user;
+  });
+}
+
+export async function setUserActiveState(input: {
+  adminUserId: string;
+  userId: string;
+  isActive: boolean;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({
+      where: { id: input.userId },
+      data: {
+        isActive: input.isActive,
+        failedLoginAttempts: 0,
+        lockedUntil: null
+      }
+    });
+
+    if (!input.isActive) {
+      await tx.session.deleteMany({
+        where: { userId: input.userId }
+      });
+    }
+
+    await addAudit(
+      tx,
+      input.adminUserId,
+      input.isActive ? "REACTIVATE_USER" : "DEACTIVATE_USER",
+      "User",
+      user.id,
+      `${input.isActive ? "Reactivated" : "Deactivated"} account for ${user.fullName}.`
+    );
+
+    return user;
+  });
+}
+
+export async function retireSampleAccounts(input: {
+  adminUserId: string;
+  excludeUserId?: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const sampleUsers = await tx.user.findMany({
+      where: {
+        email: { in: [...SAMPLE_ACCOUNT_EMAILS] },
+        ...(input.excludeUserId ? { id: { not: input.excludeUserId } } : {})
+      }
+    });
+
+    if (sampleUsers.length === 0) {
+      return 0;
+    }
+
+    await tx.user.updateMany({
+      where: {
+        id: { in: sampleUsers.map((user) => user.id) }
+      },
+      data: {
+        isActive: false,
+        failedLoginAttempts: 0,
+        lockedUntil: null
+      }
+    });
+
+    await tx.session.deleteMany({
+      where: {
+        userId: { in: sampleUsers.map((user) => user.id) }
+      }
+    });
+
+    await addAudit(
+      tx,
+      input.adminUserId,
+      "RETIRE_SAMPLE_ACCOUNTS",
+      "User",
+      sampleUsers.map((user) => user.id).join(","),
+      `Retired ${sampleUsers.length} sample account(s).`
+    );
+
+    return sampleUsers.length;
+  });
+}
+
+export async function recordPrivilegedAccessReview(input: {
+  adminUserId: string;
+  reviewerName: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+
+    await tx.setting.upsert({
+      where: { key: "security.lastPrivilegedAccessReviewAt" },
+      update: { value: now.toISOString() },
+      create: { key: "security.lastPrivilegedAccessReviewAt", value: now.toISOString() }
+    });
+
+    await tx.setting.upsert({
+      where: { key: "security.lastPrivilegedAccessReviewBy" },
+      update: { value: input.reviewerName },
+      create: { key: "security.lastPrivilegedAccessReviewBy", value: input.reviewerName }
+    });
+
+    await addAudit(
+      tx,
+      input.adminUserId,
+      "REVIEW_PRIVILEGED_ACCESS",
+      "User",
+      input.adminUserId,
+      `${input.reviewerName} reviewed privileged Finance and HR access assignments.`
+    );
   });
 }
 
@@ -1139,6 +1432,468 @@ export async function submitPayrollToFinance(input: {
     );
 
     return updatedRun;
+  });
+}
+
+export async function populateStarterOperationalData(input: { userId: string }) {
+  return prisma.$transaction(async (tx) => {
+    const actor = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, include: { staff: true } });
+
+    const categories = await Promise.all(
+      [
+        { name: "Smartphones", description: "Android and iPhone retail stock" },
+        { name: "Feature Phones", description: "Reliable entry-level handsets" },
+        { name: "Accessories", description: "Chargers, covers, and earphones" }
+      ].map((category) =>
+        tx.productCategory.upsert({
+          where: { name: category.name },
+          update: { description: category.description },
+          create: category
+        })
+      )
+    );
+
+    const products = await Promise.all([
+      tx.product.upsert({
+        where: { sku: "PHN-SM-A55" },
+        update: {},
+        create: {
+          sku: "PHN-SM-A55",
+          name: "Samsung Galaxy A55 256GB",
+          brand: "Samsung",
+          model: "Galaxy A55",
+          description: "Mid-premium Android handset for wholesale retail supply.",
+          categoryId: categories[0].id,
+          unitPrice: money(58500),
+          taxRate: money(16),
+          reorderLevel: 10,
+          stockOnHand: 36,
+          reservedStock: 0,
+          imeiTracked: true
+        }
+      }),
+      tx.product.upsert({
+        where: { sku: "PHN-TEC-SP10" },
+        update: {},
+        create: {
+          sku: "PHN-TEC-SP10",
+          name: "Tecno Spark 10C 128GB",
+          brand: "Tecno",
+          model: "Spark 10C",
+          description: "Fast-moving budget smartphone for neighborhood retailers.",
+          categoryId: categories[0].id,
+          unitPrice: money(17800),
+          taxRate: money(16),
+          reorderLevel: 30,
+          stockOnHand: 110,
+          reservedStock: 0,
+          imeiTracked: true
+        }
+      }),
+      tx.product.upsert({
+        where: { sku: "PHN-NOK-150" },
+        update: {},
+        create: {
+          sku: "PHN-NOK-150",
+          name: "Nokia 150",
+          brand: "Nokia",
+          model: "150",
+          description: "Durable feature phone for rural and kiosk demand.",
+          categoryId: categories[1].id,
+          unitPrice: money(3900),
+          taxRate: money(16),
+          reorderLevel: 50,
+          stockOnHand: 180,
+          reservedStock: 0,
+          imeiTracked: false
+        }
+      }),
+      tx.product.upsert({
+        where: { sku: "PHN-ACC-CH25" },
+        update: {},
+        create: {
+          sku: "PHN-ACC-CH25",
+          name: "25W Fast Charger",
+          brand: "Voltix",
+          model: "CH25",
+          description: "Fast charger for Android smartphone bundles.",
+          categoryId: categories[2].id,
+          unitPrice: money(1800),
+          taxRate: money(16),
+          reorderLevel: 60,
+          stockOnHand: 220,
+          reservedStock: 0,
+          imeiTracked: false
+        }
+      })
+    ]);
+
+    const customers = await Promise.all([
+      tx.customer.upsert({
+        where: { code: "CUS-101" },
+        update: {},
+        create: {
+          code: "CUS-101",
+          name: "Capital Mobile Traders Ltd",
+          segment: "Key Account",
+          industry: "Phone Retail",
+          email: "procurement@capitalmobile.co.ke",
+          phone: "+254711200300",
+          city: "Nairobi",
+          address: "Luthuli Avenue, Nairobi",
+          creditLimit: money(1250000),
+          overdueBalance: money(0),
+          notes: "Buys mixed Android and accessories for CBD outlets."
+        }
+      }),
+      tx.customer.upsert({
+        where: { code: "CUS-102" },
+        update: {},
+        create: {
+          code: "CUS-102",
+          name: "Lakeview Devices Limited",
+          segment: "Regional Buyer",
+          industry: "Phone Retail",
+          email: "orders@lakeviewdevices.co.ke",
+          phone: "+254722555610",
+          city: "Kisumu",
+          address: "Oginga Odinga Street, Kisumu",
+          creditLimit: money(820000),
+          overdueBalance: money(0),
+          notes: "Frequently buys Spark series and accessories."
+        }
+      })
+    ]);
+
+    await Promise.all(
+      [
+        {
+          name: "Order Confirmation",
+          channel: "Email",
+          triggerEvent: "ORDER_CONFIRMED",
+          subject: "Your phone order has been confirmed",
+          body: "We have confirmed your wholesale order and moved it to fulfillment."
+        },
+        {
+          name: "Invoice Issued",
+          channel: "Email",
+          triggerEvent: "INVOICE_ISSUED",
+          subject: "Your invoice is ready",
+          body: "The ERP has generated an invoice with tax and delivery breakdown."
+        },
+        {
+          name: "Payment Receipt",
+          channel: "Email",
+          triggerEvent: "PAYMENT_RECORDED",
+          subject: "Payment posted",
+          body: "We have posted your payment and updated the outstanding balance."
+        },
+        {
+          name: "Delivery Update",
+          channel: "SMS",
+          triggerEvent: "DELIVERY_IN_TRANSIT",
+          subject: null,
+          body: "Your order is on the way."
+        }
+      ].map((template) =>
+        tx.communicationTemplate.upsert({
+          where: { name: template.name },
+          update: {
+            channel: template.channel,
+            triggerEvent: template.triggerEvent,
+            subject: template.subject,
+            body: template.body
+          },
+          create: template
+        })
+      )
+    );
+
+    const salesUser =
+      (await tx.user.findFirst({ where: { role: "SALES", isActive: true } })) ??
+      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+      actor;
+    const financeUser =
+      (await tx.user.findFirst({ where: { role: "FINANCE", isActive: true } })) ??
+      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+      actor;
+    const warehouseUser =
+      (await tx.user.findFirst({ where: { role: "WAREHOUSE", isActive: true } })) ??
+      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+      actor;
+    const driver = await tx.staff.findFirst({
+      where: {
+        OR: [{ roleLabel: "DELIVERY" }, { roleLabel: "Delivery" }]
+      }
+    });
+
+    if ((await tx.order.count()) === 0) {
+      const totals = computeTotals(
+        [
+          {
+            quantity: 6,
+            unitPrice: toNumber(products[0].unitPrice),
+            discount: 3000,
+            taxRate: toNumber(products[0].taxRate)
+          }
+        ],
+        2500
+      );
+
+      const order = await tx.order.create({
+        data: {
+          orderNumber: await nextSequence("ORD", "orderNumber"),
+          customerId: customers[0].id,
+          createdById: salesUser.id,
+          status: OrderStatus.CONFIRMED,
+          subtotal: money(totals.subtotal),
+          discountTotal: money(totals.discountTotal),
+          taxTotal: money(totals.taxTotal),
+          deliveryFee: money(totals.deliveryFee),
+          grandTotal: money(totals.grandTotal),
+          notes: "Example wholesale order for explaining order, invoice, and delivery flow.",
+          items: {
+            create: {
+              productId: products[0].id,
+              quantity: 6,
+              unitPrice: products[0].unitPrice,
+              discount: money(3000),
+              taxRate: products[0].taxRate,
+              lineTotal: money(computeLineTotal(6, toNumber(products[0].unitPrice), 3000))
+            }
+          }
+        },
+        include: { items: true }
+      });
+
+      const invoice = await tx.invoice.create({
+        data: {
+          invoiceNumber: `INV-${new Date().getFullYear()}-${String((await tx.invoice.count()) + 1).padStart(4, "0")}`,
+          orderId: order.id,
+          customerId: customers[0].id,
+          createdById: financeUser.id,
+          status: InvoiceStatus.PARTIALLY_PAID,
+          issueDate: new Date(),
+          dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          subtotal: money(totals.subtotal),
+          discountTotal: money(totals.discountTotal),
+          taxTotal: money(totals.taxTotal),
+          deliveryFee: money(totals.deliveryFee),
+          grandTotal: money(totals.grandTotal),
+          paidAmount: money(150000),
+          notes: "Example invoice with full tax and delivery breakdown for demonstration.",
+          items: {
+            create: order.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              taxRate: item.taxRate,
+              lineTotal: item.lineTotal
+            }))
+          },
+          payments: {
+            create: {
+              amount: money(150000),
+              method: "Bank Transfer",
+              reference: "PAY-DEMO-001",
+              note: "Part-payment used to demonstrate balance tracking.",
+              receivedAt: new Date()
+            }
+          }
+        }
+      });
+
+      const delivery = await tx.delivery.create({
+        data: {
+          deliveryNumber: await nextSequence(`DEL-${new Date().getFullYear()}`, "deliveryNumber"),
+          orderId: order.id,
+          invoiceId: invoice.id,
+          createdById: warehouseUser.id,
+          assignedDriverId: driver?.id ?? null,
+          status: DeliveryStatus.DELIVERED,
+          dispatchDate: new Date(Date.now() - 4 * 60 * 60 * 1000),
+          deliveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+          destination: customers[0].address,
+          customerName: customers[0].name,
+          customerPhone: customers[0].phone,
+          trackingNotes: "Example completed delivery showing signed handoff.",
+          items: {
+            create: order.items.map((item) => ({
+              productId: item.productId,
+              quantity: item.quantity
+            }))
+          },
+          proofOfDelivery: {
+            create: {
+              recipientName: "Grace Nduta",
+              signatureText: "Grace Nduta",
+              location: "Capital Mobile Traders receiving bay",
+              deliveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+              notes: "Accepted in good condition."
+            }
+          }
+        }
+      });
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: { status: OrderStatus.DELIVERED }
+      });
+
+      await addCommunication(tx, {
+        customerId: customers[0].id,
+        orderId: order.id,
+        channel: "Email",
+        eventType: "ORDER_CONFIRMED",
+        templateName: "Order Confirmation",
+        subject: `Order ${order.orderNumber} confirmed`,
+        recipientName: customers[0].name,
+        recipientContact: customers[0].email ?? customers[0].phone,
+        body: `Example order ${order.orderNumber} was confirmed by Sales and passed to Finance for invoicing.`,
+        status: "Sent"
+      });
+
+      await addCommunication(tx, {
+        customerId: customers[0].id,
+        orderId: order.id,
+        invoiceId: invoice.id,
+        channel: "Email",
+        eventType: "INVOICE_ISSUED",
+        templateName: "Invoice Issued",
+        subject: `Invoice ${invoice.invoiceNumber} issued`,
+        recipientName: customers[0].name,
+        recipientContact: customers[0].email ?? customers[0].phone,
+        body: `Finance issued ${invoice.invoiceNumber} with subtotal, discount, tax, delivery, paid amount, and balance.`,
+        status: "Sent"
+      });
+
+      await addCommunication(tx, {
+        customerId: customers[0].id,
+        orderId: order.id,
+        invoiceId: invoice.id,
+        channel: "Email",
+        eventType: "PAYMENT_RECORDED",
+        templateName: "Payment Receipt",
+        subject: `Payment posted for ${invoice.invoiceNumber}`,
+        recipientName: customers[0].name,
+        recipientContact: customers[0].email ?? customers[0].phone,
+        body: `Finance recorded KES 150,000 and the invoice still shows an outstanding balance.`,
+        status: "Sent"
+      });
+
+      await addCommunication(tx, {
+        customerId: customers[0].id,
+        orderId: order.id,
+        invoiceId: invoice.id,
+        deliveryId: delivery.id,
+        channel: "SMS",
+        eventType: "DELIVERY_COMPLETED",
+        templateName: "Proof of Delivery",
+        subject: `Delivery ${delivery.deliveryNumber} completed`,
+        recipientName: "Grace Nduta",
+        recipientContact: customers[0].phone,
+        body: `Driver completed ${delivery.deliveryNumber} and captured customer signature for proof of delivery.`,
+        status: "Sent"
+      });
+    }
+
+    if ((await tx.payrollRun.count()) === 0) {
+      const staff = await tx.staff.findMany({
+        where: {
+          user: { isActive: true }
+        },
+        include: { user: true },
+        orderBy: { employeeCode: "asc" }
+      });
+
+      if (staff.length > 0) {
+        const payrollRows = staff.map((member, index) => {
+          const basicSalary = Number(member.monthlySalary) || 50000 + index * 5000;
+          const allowance = member.department === "Sales" ? 12000 : member.department === "Finance" ? 9000 : 7000;
+          const commission = member.department === "Sales" ? 8500 : 0;
+          const otherDeductions = index === 0 ? 1500 : 0;
+
+          return {
+            staffId: member.id,
+            ...computePayrollBreakdown({
+              basicSalary,
+              allowance,
+              commission,
+              otherDeductions
+            })
+          };
+        });
+
+        const totalGross = payrollRows.reduce((sum, row) => sum + row.grossPay, 0);
+        const totalNet = payrollRows.reduce((sum, row) => sum + row.netPay, 0);
+        const currentMonth = new Date().toLocaleString("en-KE", { month: "long", year: "numeric" });
+
+        const payrollRun = await tx.payrollRun.create({
+          data: {
+            label: `${currentMonth} Payroll`,
+            periodStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+            periodEnd: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0),
+            status: PayrollRunStatus.CALCULATED,
+            totalGross: money(totalGross),
+            totalNet: money(totalNet)
+          }
+        });
+
+        await Promise.all(
+          payrollRows.map((row) =>
+            tx.payrollItem.create({
+              data: {
+                payrollRunId: payrollRun.id,
+                staffId: row.staffId,
+                basicSalary: money(row.basicSalary),
+                allowance: money(row.allowance),
+                commission: money(row.commission),
+                grossPay: money(row.grossPay),
+                taxablePay: money(row.taxablePay),
+                paye: money(row.paye),
+                shif: money(row.shif),
+                nssfEmployee: money(row.nssfEmployee),
+                housingLevy: money(row.housingLevy),
+                otherDeductions: money(row.otherDeductions),
+                totalDeductions: money(row.totalDeductions),
+                netPay: money(row.netPay)
+              }
+            })
+          )
+        );
+
+        await addCommunication(tx, {
+          channel: "Internal",
+          direction: CommunicationDirection.INTERNAL,
+          eventType: "PAYROLL_EXAMPLE_PREPARED",
+          templateName: "Payroll Preparation",
+          subject: `${payrollRun.label} prepared by HR`,
+          recipientName: "Finance Department",
+          recipientContact: "Finance queue",
+          body: `Example payroll run ${payrollRun.label} has been prepared so HR can demonstrate salary review and later submit it to Finance for disbursement.`,
+          status: "Prepared"
+        });
+      }
+    }
+
+    await addAudit(
+      tx,
+      input.userId,
+      "POPULATE_STARTER_DATA",
+      "System",
+      actor.id,
+      "Loaded non-destructive starter categories, products, customers, invoice flow, delivery proof, and payroll examples."
+    );
+
+    return {
+      categories: await tx.productCategory.count(),
+      customers: await tx.customer.count(),
+      products: await tx.product.count(),
+      orders: await tx.order.count(),
+      invoices: await tx.invoice.count(),
+      deliveries: await tx.delivery.count(),
+      payrollRuns: await tx.payrollRun.count()
+    };
   });
 }
 

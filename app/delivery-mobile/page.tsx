@@ -34,6 +34,7 @@ export default async function DeliveryMobilePage() {
               <div className="mt-4 rounded-2xl bg-white p-4 text-sm text-slate-600">
                 <p>Customer phone: {delivery.customerPhone}</p>
                 <p>Dispatch time: {delivery.dispatchDate ? formatDateTime(delivery.dispatchDate) : "Not started"}</p>
+                <p>Linked order status updates to Delivered after successful handoff.</p>
                 <p>Items: {delivery.items.map((item) => `${item.product.name} x ${item.quantity}`).join(", ")}</p>
               </div>
 
@@ -55,7 +56,7 @@ export default async function DeliveryMobilePage() {
                   <Input
                     id={`signatureText-${delivery.id}`}
                     name="signatureText"
-                    placeholder="Type signed name as acknowledgment"
+                    placeholder="Customer signs or types signed name as acknowledgment"
                     required
                   />
                 </div>
@@ -69,6 +70,15 @@ export default async function DeliveryMobilePage() {
                 </div>
                 <SubmitButton>Mark delivered</SubmitButton>
               </form>
+
+              {delivery.proofOfDelivery ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+                  <p className="font-medium">Recorded proof of delivery</p>
+                  <p className="mt-2">Recipient: {delivery.proofOfDelivery.recipientName}</p>
+                  <p>Signature: {delivery.proofOfDelivery.signatureText}</p>
+                  <p>Delivered: {formatDateTime(delivery.proofOfDelivery.deliveredAt)}</p>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

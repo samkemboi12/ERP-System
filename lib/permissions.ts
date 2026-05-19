@@ -3,6 +3,8 @@ import type { Route } from "next";
 
 export type AppRoute =
   | "/"
+  | "/account/security"
+  | "/finance"
   | "/customers"
   | "/products"
   | "/inventory"
@@ -29,12 +31,13 @@ export const roleHomeMap: Record<RoleKey, Route> = {
   WAREHOUSE: "/inventory",
   DELIVERY: "/delivery-mobile",
   HR: "/payroll",
-  FINANCE: "/invoices",
+  FINANCE: "/finance",
   MANAGER: "/reports"
 };
 
 export const navItems: readonly NavItem[] = [
   { href: "/", label: "Dashboard", roles: ["ADMIN", "SALES", "WAREHOUSE", "FINANCE", "MANAGER"] },
+  { href: "/finance", label: "Finance", roles: ["ADMIN", "FINANCE", "MANAGER"] },
   { href: "/customers", label: "Customers", roles: ["ADMIN", "SALES", "MANAGER"] },
   { href: "/products", label: "Products", roles: ["ADMIN", "SALES", "WAREHOUSE", "MANAGER"] },
   { href: "/inventory", label: "Inventory", roles: ["ADMIN", "WAREHOUSE", "MANAGER"] },
@@ -50,13 +53,13 @@ export const navItems: readonly NavItem[] = [
 ] as const;
 
 const allowedPrefixes: Record<RoleKey, string[]> = {
-  ADMIN: ["/"],
-  SALES: ["/", "/customers", "/products", "/orders", "/invoices", "/deliveries", "/communications"],
-  WAREHOUSE: ["/", "/products", "/inventory", "/orders", "/deliveries", "/communications"],
-  DELIVERY: ["/delivery-mobile"],
-  HR: ["/staff", "/payroll"],
-  FINANCE: ["/", "/invoices", "/reports", "/payroll", "/communications"],
-  MANAGER: ["/", "/customers", "/products", "/orders", "/invoices", "/deliveries", "/reports", "/staff", "/communications"]
+  ADMIN: ["/", "/account/security"],
+  FINANCE: ["/", "/account/security", "/finance", "/invoices", "/reports", "/payroll", "/communications"],
+  SALES: ["/", "/account/security", "/customers", "/products", "/orders", "/invoices", "/deliveries", "/communications"],
+  WAREHOUSE: ["/", "/account/security", "/products", "/inventory", "/orders", "/deliveries", "/communications"],
+  DELIVERY: ["/account/security", "/delivery-mobile"],
+  HR: ["/account/security", "/staff", "/payroll"],
+  MANAGER: ["/", "/account/security", "/customers", "/products", "/orders", "/invoices", "/deliveries", "/reports", "/staff", "/communications"]
 };
 
 export function canAccessPath(role: RoleKey, path: string) {

@@ -62,6 +62,35 @@ export default async function PayrollPage({
           ) : null}
         </Section>
 
+        <Section
+          eyebrow="Explainer"
+          title="How to explain the payroll flow"
+          description="Use this as a simple business explanation when demonstrating the ERP to HR, Finance, or management."
+        >
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-medium text-ink">Step 1: HR prepares payroll</p>
+              <p className="mt-2">
+                HR reviews each employee record, confirms salary and allowance, then the ERP calculates PAYE, SHIF, NSSF, Housing Levy, total deductions,
+                and net salary.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-medium text-ink">Step 2: HR submits to Finance</p>
+              <p className="mt-2">
+                HR uses the month-end handoff form below to send the approved payroll figures to Finance. The system records that communication in the ERP trail.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-medium text-ink">Step 3: Finance disburses salaries</p>
+              <p className="mt-2">
+                Finance works from the approved net-pay amounts and uses bank transfer, payroll file upload, or mobile-money disbursement outside the ERP,
+                while keeping the ERP as the control record.
+              </p>
+            </div>
+          </div>
+        </Section>
+
         {latestRun ? (
           <Section
             eyebrow="Month end handoff"

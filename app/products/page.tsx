@@ -1,17 +1,31 @@
 import { AppShell } from "@/components/shell";
 import { FormGrid, Input, Section, Select, SubmitButton, Table, Textarea } from "@/components/ui";
-import { createProductAction } from "@/lib/actions";
+import { createProductAction, createProductCategoryAction } from "@/lib/actions";
 import { getCollections } from "@/lib/services";
 import { requireRouteAccess } from "@/lib/session";
 import { formatCurrency, slugLabel } from "@/lib/utils";
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ categoryCreated?: string; categoryError?: string }>;
+}) {
   const user = await requireRouteAccess("/products");
-  const { categories, products } = await getCollections();
+  const [{ categories, products }, params] = await Promise.all([getCollections(), searchParams]);
 
   return (
     <AppShell user={{ fullName: user.fullName, role: slugLabel(user.role), roleKey: user.role }}>
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        {params?.categoryCreated ? (
+          <div className="xl:col-span-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Product category created successfully. You can now select it while adding products.
+          </div>
+        ) : null}
+
+        {params?.categoryError ? (
+          <div className="xl:col-span-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{params.categoryError}</div>
+        ) : null}
+
         <Section eyebrow="Catalog" title="Phones and accessories">
           <Table>
             <table>
@@ -47,8 +61,33 @@ export default async function ProductsPage() {
           </Table>
         </Section>
 
-        <Section eyebrow="Add SKU" title="Create product">
-          <form action={createProductAction} className="space-y-4">
+        <Section
+          eyebrow="Add SKU"
+          title="Create product"
+          description="Products depend on categories first. If this is your first setup, create one or two categories below, then return to the product form."
+        >
+          {categories.length === 0 ? (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No categories exist yet, so the product category dropdown would be empty. Create a category first.
+            </div>
+          ) : null}
+
+          <form action={createProductCategoryAction} className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-medium text-ink">Quick category setup</p>
+            <FormGrid>
+              <div>
+                <label htmlFor="category-name">Category name</label>
+                <Input id="category-name" name="name" placeholder="Smartphones" required />
+              </div>
+              <div>
+                <label htmlFor="category-description">Description</label>
+                <Input id="category-description" name="description" placeholder="Android and iPhone stock" />
+              </div>
+            </FormGrid>
+            <SubmitButton>Create category</SubmitButton>
+          </form>
+
+          <form action={createProductAction} className="mt-5 space-y-4">
             <FormGrid>
               <div>
                 <label htmlFor="name">Product name</label>
@@ -65,6 +104,7 @@ export default async function ProductsPage() {
               <div>
                 <label htmlFor="categoryId">Category</label>
                 <Select id="categoryId" name="categoryId" required>
+                  {categories.length === 0 ? <option value="">Create a category first</option> : null}
                   {categories.map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.name}

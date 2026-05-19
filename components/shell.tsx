@@ -60,6 +60,9 @@ export function AppShell({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-3">
+                <Link className="rounded-full bg-white px-4 py-2 text-sm font-medium text-ink transition hover:bg-slate-100" href="/account/security">
+                  Account Security
+                </Link>
                 <div className="rounded-full bg-sky-50 px-4 py-2 text-sm font-medium text-sky-700">Signed in as {user.fullName}</div>
                 <form action={logoutAction}>
                   <button className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-slate">

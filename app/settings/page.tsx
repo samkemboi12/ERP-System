@@ -1,19 +1,36 @@
 import { AppShell } from "@/components/shell";
 import { FormGrid, Input, Section, Select, SubmitButton, Table } from "@/components/ui";
-import { createManagedUserAccountAction } from "@/lib/actions";
-import { getCollections, getUserDirectory } from "@/lib/services";
+import {
+  adminResetUserPasswordAction,
+  createManagedUserAccountAction,
+  populateStarterOperationalDataAction,
+  recordPrivilegedAccessReviewAction,
+  retireSampleAccountsAction,
+  toggleUserActiveStateAction
+} from "@/lib/actions";
+import { getCollections, getSecurityReviewData, getUserDirectory } from "@/lib/services";
 import { requireRouteAccess } from "@/lib/session";
 import { formatDateTime, slugLabel } from "@/lib/utils";
 
 export default async function SettingsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ userCreated?: string; userError?: string }>;
+  searchParams?: Promise<{
+    retired?: string;
+    reviewed?: string;
+    starterLoaded?: string;
+    userCreated?: string;
+    userDeactivated?: string;
+    userError?: string;
+    userReactivated?: string;
+    userReset?: string;
+  }>;
 }) {
   const user = await requireRouteAccess("/settings");
-  const [{ settings, templates, auditLogs }, users, params] = await Promise.all([
+  const [{ settings, templates, auditLogs }, users, securityData, params] = await Promise.all([
     getCollections(),
     getUserDirectory(),
+    getSecurityReviewData(),
     searchParams
   ]);
 
@@ -23,6 +40,42 @@ export default async function SettingsPage({
         {params?.userCreated ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
             Department account created successfully. Share the temporary password securely, then ask the staff member to change it immediately.
+          </div>
+        ) : null}
+
+        {params?.userReset ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Password reset completed. The user must change that temporary password after the next login.
+          </div>
+        ) : null}
+
+        {params?.userDeactivated ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            User account deactivated and active sessions cleared.
+          </div>
+        ) : null}
+
+        {params?.userReactivated ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            User account reactivated successfully.
+          </div>
+        ) : null}
+
+        {params?.reviewed ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Privileged Finance and HR access review has been recorded.
+          </div>
+        ) : null}
+
+        {typeof params?.retired !== "undefined" ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Retired {params.retired} sample account(s). Any matching sample sessions were signed out.
+          </div>
+        ) : null}
+
+        {params?.starterLoaded ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            Starter operational examples loaded successfully. Categories, products, customers, invoice flow, delivery proof, and payroll examples are now available without altering your existing accounts.
           </div>
         ) : null}
 
@@ -105,6 +158,8 @@ export default async function SettingsPage({
                     <th>Email</th>
                     <th>Role</th>
                     <th>Department</th>
+                    <th>Must change</th>
+                    <th>Last login</th>
                     <th>Status</th>
                     <th>Created</th>
                   </tr>
@@ -116,6 +171,8 @@ export default async function SettingsPage({
                       <td>{account.email}</td>
                       <td>{slugLabel(account.role)}</td>
                       <td>{account.staff?.department ?? "Unassigned"}</td>
+                      <td>{account.mustChangePassword ? "Yes" : "No"}</td>
+                      <td>{account.lastLoginAt ? formatDateTime(account.lastLoginAt) : "Never"}</td>
                       <td>{account.isActive ? "Active" : "Inactive"}</td>
                       <td>{formatDateTime(account.createdAt)}</td>
                     </tr>
@@ -203,6 +260,118 @@ export default async function SettingsPage({
             </form>
           </Section>
         </section>
+
+        <Section
+          eyebrow="Access review"
+          title="Privileged role review"
+          description="These are the accounts with access to Admin, Finance, or HR functions. Record a periodic review so the company can confirm only the right people still hold privileged access."
+        >
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            <Table>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Department</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {securityData.privilegedUsers.map((account) => (
+                    <tr key={account.id}>
+                      <td>{account.fullName}</td>
+                      <td>{account.email}</td>
+                      <td>{slugLabel(account.role)}</td>
+                      <td>{account.staff?.department ?? "Unassigned"}</td>
+                      <td>{account.isActive ? "Active" : "Inactive"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Table>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <p className="font-medium text-ink">Last recorded review</p>
+                <p className="mt-2">
+                  {securityData.lastReviewedAt
+                    ? `${formatDateTime(securityData.lastReviewedAt)} by ${securityData.lastReviewedBy ?? "Unknown reviewer"}`
+                    : "No privileged access review has been recorded yet."}
+                </p>
+              </div>
+
+              <form action={recordPrivilegedAccessReviewAction}>
+                <SubmitButton>Record access review</SubmitButton>
+              </form>
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                Recommended practice: review Admin, Finance, and HR access at least once every month and whenever an employee changes department or leaves the company.
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Section
+          eyebrow="Lifecycle control"
+          title="Account resets, activation, and sample-account retirement"
+          description="Use these controls to replace temporary passwords, suspend access safely, and retire any old sample accounts left from early setup."
+        >
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <form action={populateStarterOperationalDataAction}>
+              <SubmitButton>Load starter examples</SubmitButton>
+            </form>
+            <form action={retireSampleAccountsAction}>
+              <SubmitButton>Retire sample accounts</SubmitButton>
+            </form>
+            <div className="text-sm text-slate-500">
+              Detected sample accounts: {securityData.sampleUsers.length}
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            {users.map((account) => (
+              <div key={account.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <p className="font-medium text-ink">{account.fullName}</p>
+                    <p className="text-sm text-slate-500">
+                      {account.email} · {slugLabel(account.role)} · {account.isActive ? "Active" : "Inactive"}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      Last login: {account.lastLoginAt ? formatDateTime(account.lastLoginAt) : "Never"} · Password change required:{" "}
+                      {account.mustChangePassword ? "Yes" : "No"}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                    <form action={adminResetUserPasswordAction} className="flex flex-wrap items-end gap-3">
+                      <Input name="userId" type="hidden" value={account.id} />
+                      <div>
+                        <label htmlFor={`reset-${account.id}`}>Temporary password</label>
+                        <Input id={`reset-${account.id}`} name="newPassword" placeholder="Strong temporary password" required type="password" />
+                      </div>
+                      <SubmitButton>Reset password</SubmitButton>
+                    </form>
+
+                    {account.id !== user.id ? (
+                      <form action={toggleUserActiveStateAction}>
+                        <Input name="nextState" type="hidden" value={account.isActive ? "inactive" : "active"} />
+                        <Input name="userId" type="hidden" value={account.id} />
+                        <SubmitButton>{account.isActive ? "Deactivate" : "Reactivate"}</SubmitButton>
+                      </form>
+                    ) : (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                        Current admin session cannot deactivate itself here.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
       </div>
     </AppShell>
   );

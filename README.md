@@ -7,9 +7,11 @@ PhoneFlow ERP is a PostgreSQL-backed ERP starter for a wholesale phone business 
 - stock movements and low-stock monitoring
 - sales orders and status transitions
 - invoice generation with preview and print button
+- invoice preview with item, tax, discount, delivery-fee, paid, and balance breakdown plus download option
 - payment capture and balance tracking
 - delivery assignment, dispatch, and proof of delivery
 - department-based access control
+- dedicated finance hub
 - payroll with PAYE, SHIF, NSSF, and Housing Levy sample deductions
 - communication flow from order through invoice, delivery, and payment
 
@@ -28,6 +30,7 @@ This project is configured to use:
 ```env
 DATABASE_URL="postgresql://postgres:your-password@localhost:5432/phones_erp?schema=public"
 DIRECT_URL="postgresql://postgres:your-password@localhost:5432/phones_erp?schema=public"
+SESSION_SECRET="replace-with-a-long-random-secret"
 ```
 
 On this machine, the local PostgreSQL user that worked was:
@@ -82,6 +85,7 @@ Open `http://localhost:3000`.
 - `/` dashboard
 - `/customers` retail company customers
 - `/products` phone catalog
+- `/finance` finance hub
 - `/inventory` warehouse stock ledger
 - `/orders` sales order flow
 - `/invoices` invoice list
@@ -114,13 +118,18 @@ Open `http://localhost:3000`.
 
 ## Notes
 
-- The current authentication is demo-grade for internal testing.
 - Passwords are stored as secure hashes and legacy plaintext records auto-upgrade on successful login.
+- Authentication now uses server-managed sessions instead of an email-only cookie.
+- New department accounts are created with forced password change on first login.
+- Admin can reset passwords, deactivate/reactivate users, retire sample accounts, and record periodic privileged-access reviews.
+- Admin can load non-destructive starter operational examples from `Settings` without replacing existing accounts.
+- Products now support in-app category setup if the category dropdown is empty on a fresh database.
 - Department access is restricted in both UI navigation and route access.
 - Stock is deducted at dispatch in the current workflow.
 - Payroll deductions are implemented as a functional sample using current Kenya payroll concepts and seeded rates.
 - HR or Admin can submit the latest payroll run to Finance for salary disbursement from `/payroll`, and the handoff is logged internally.
 - For Vercel + Supabase rollout, use [DEPLOYMENT_GUIDE.md](C:/Users/samwel/OneDrive/Desktop/ERP/DEPLOYMENT_GUIDE.md).
+- For a fuller company-facing explanation of safety and rollout controls, use [SECURITY_AND_IMPLEMENTATION_OVERVIEW.md](C:/Users/samwel/OneDrive/Desktop/ERP/SECURITY_AND_IMPLEMENTATION_OVERVIEW.md) and [REPORTING_AND_INTEGRATION_GUIDE.md](C:/Users/samwel/OneDrive/Desktop/ERP/REPORTING_AND_INTEGRATION_GUIDE.md).
 
 ## Verified locally
 
