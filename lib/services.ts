@@ -1436,198 +1436,199 @@ export async function submitPayrollToFinance(input: {
 }
 
 export async function populateStarterOperationalData(input: { userId: string }) {
-  return prisma.$transaction(async (tx) => {
-    const actor = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, include: { staff: true } });
+  return prisma.$transaction(
+    async (tx) => {
+      const actor = await tx.user.findUniqueOrThrow({ where: { id: input.userId }, include: { staff: true } });
 
-    const categories = await Promise.all(
-      [
-        { name: "Smartphones", description: "Android and iPhone retail stock" },
-        { name: "Feature Phones", description: "Reliable entry-level handsets" },
-        { name: "Accessories", description: "Chargers, covers, and earphones" }
-      ].map((category) =>
-        tx.productCategory.upsert({
-          where: { name: category.name },
-          update: { description: category.description },
-          create: category
+      const categories = await Promise.all(
+        [
+          { name: "Smartphones", description: "Android and iPhone retail stock" },
+          { name: "Feature Phones", description: "Reliable entry-level handsets" },
+          { name: "Accessories", description: "Chargers, covers, and earphones" }
+        ].map((category) =>
+          tx.productCategory.upsert({
+            where: { name: category.name },
+            update: { description: category.description },
+            create: category
+          })
+        )
+      );
+
+      const products = await Promise.all([
+        tx.product.upsert({
+          where: { sku: "PHN-SM-A55" },
+          update: {},
+          create: {
+            sku: "PHN-SM-A55",
+            name: "Samsung Galaxy A55 256GB",
+            brand: "Samsung",
+            model: "Galaxy A55",
+            description: "Mid-premium Android handset for wholesale retail supply.",
+            categoryId: categories[0].id,
+            unitPrice: money(58500),
+            taxRate: money(16),
+            reorderLevel: 10,
+            stockOnHand: 36,
+            reservedStock: 0,
+            imeiTracked: true
+          }
+        }),
+        tx.product.upsert({
+          where: { sku: "PHN-TEC-SP10" },
+          update: {},
+          create: {
+            sku: "PHN-TEC-SP10",
+            name: "Tecno Spark 10C 128GB",
+            brand: "Tecno",
+            model: "Spark 10C",
+            description: "Fast-moving budget smartphone for neighborhood retailers.",
+            categoryId: categories[0].id,
+            unitPrice: money(17800),
+            taxRate: money(16),
+            reorderLevel: 30,
+            stockOnHand: 110,
+            reservedStock: 0,
+            imeiTracked: true
+          }
+        }),
+        tx.product.upsert({
+          where: { sku: "PHN-NOK-150" },
+          update: {},
+          create: {
+            sku: "PHN-NOK-150",
+            name: "Nokia 150",
+            brand: "Nokia",
+            model: "150",
+            description: "Durable feature phone for rural and kiosk demand.",
+            categoryId: categories[1].id,
+            unitPrice: money(3900),
+            taxRate: money(16),
+            reorderLevel: 50,
+            stockOnHand: 180,
+            reservedStock: 0,
+            imeiTracked: false
+          }
+        }),
+        tx.product.upsert({
+          where: { sku: "PHN-ACC-CH25" },
+          update: {},
+          create: {
+            sku: "PHN-ACC-CH25",
+            name: "25W Fast Charger",
+            brand: "Voltix",
+            model: "CH25",
+            description: "Fast charger for Android smartphone bundles.",
+            categoryId: categories[2].id,
+            unitPrice: money(1800),
+            taxRate: money(16),
+            reorderLevel: 60,
+            stockOnHand: 220,
+            reservedStock: 0,
+            imeiTracked: false
+          }
         })
-      )
-    );
+      ]);
 
-    const products = await Promise.all([
-      tx.product.upsert({
-        where: { sku: "PHN-SM-A55" },
-        update: {},
-        create: {
-          sku: "PHN-SM-A55",
-          name: "Samsung Galaxy A55 256GB",
-          brand: "Samsung",
-          model: "Galaxy A55",
-          description: "Mid-premium Android handset for wholesale retail supply.",
-          categoryId: categories[0].id,
-          unitPrice: money(58500),
-          taxRate: money(16),
-          reorderLevel: 10,
-          stockOnHand: 36,
-          reservedStock: 0,
-          imeiTracked: true
-        }
-      }),
-      tx.product.upsert({
-        where: { sku: "PHN-TEC-SP10" },
-        update: {},
-        create: {
-          sku: "PHN-TEC-SP10",
-          name: "Tecno Spark 10C 128GB",
-          brand: "Tecno",
-          model: "Spark 10C",
-          description: "Fast-moving budget smartphone for neighborhood retailers.",
-          categoryId: categories[0].id,
-          unitPrice: money(17800),
-          taxRate: money(16),
-          reorderLevel: 30,
-          stockOnHand: 110,
-          reservedStock: 0,
-          imeiTracked: true
-        }
-      }),
-      tx.product.upsert({
-        where: { sku: "PHN-NOK-150" },
-        update: {},
-        create: {
-          sku: "PHN-NOK-150",
-          name: "Nokia 150",
-          brand: "Nokia",
-          model: "150",
-          description: "Durable feature phone for rural and kiosk demand.",
-          categoryId: categories[1].id,
-          unitPrice: money(3900),
-          taxRate: money(16),
-          reorderLevel: 50,
-          stockOnHand: 180,
-          reservedStock: 0,
-          imeiTracked: false
-        }
-      }),
-      tx.product.upsert({
-        where: { sku: "PHN-ACC-CH25" },
-        update: {},
-        create: {
-          sku: "PHN-ACC-CH25",
-          name: "25W Fast Charger",
-          brand: "Voltix",
-          model: "CH25",
-          description: "Fast charger for Android smartphone bundles.",
-          categoryId: categories[2].id,
-          unitPrice: money(1800),
-          taxRate: money(16),
-          reorderLevel: 60,
-          stockOnHand: 220,
-          reservedStock: 0,
-          imeiTracked: false
-        }
-      })
-    ]);
+      const customers = await Promise.all([
+        tx.customer.upsert({
+          where: { code: "CUS-101" },
+          update: {},
+          create: {
+            code: "CUS-101",
+            name: "Capital Mobile Traders Ltd",
+            segment: "Key Account",
+            industry: "Phone Retail",
+            email: "procurement@capitalmobile.co.ke",
+            phone: "+254711200300",
+            city: "Nairobi",
+            address: "Luthuli Avenue, Nairobi",
+            creditLimit: money(1250000),
+            overdueBalance: money(0),
+            notes: "Buys mixed Android and accessories for CBD outlets."
+          }
+        }),
+        tx.customer.upsert({
+          where: { code: "CUS-102" },
+          update: {},
+          create: {
+            code: "CUS-102",
+            name: "Lakeview Devices Limited",
+            segment: "Regional Buyer",
+            industry: "Phone Retail",
+            email: "orders@lakeviewdevices.co.ke",
+            phone: "+254722555610",
+            city: "Kisumu",
+            address: "Oginga Odinga Street, Kisumu",
+            creditLimit: money(820000),
+            overdueBalance: money(0),
+            notes: "Frequently buys Spark series and accessories."
+          }
+        })
+      ]);
 
-    const customers = await Promise.all([
-      tx.customer.upsert({
-        where: { code: "CUS-101" },
-        update: {},
-        create: {
-          code: "CUS-101",
-          name: "Capital Mobile Traders Ltd",
-          segment: "Key Account",
-          industry: "Phone Retail",
-          email: "procurement@capitalmobile.co.ke",
-          phone: "+254711200300",
-          city: "Nairobi",
-          address: "Luthuli Avenue, Nairobi",
-          creditLimit: money(1250000),
-          overdueBalance: money(0),
-          notes: "Buys mixed Android and accessories for CBD outlets."
-        }
-      }),
-      tx.customer.upsert({
-        where: { code: "CUS-102" },
-        update: {},
-        create: {
-          code: "CUS-102",
-          name: "Lakeview Devices Limited",
-          segment: "Regional Buyer",
-          industry: "Phone Retail",
-          email: "orders@lakeviewdevices.co.ke",
-          phone: "+254722555610",
-          city: "Kisumu",
-          address: "Oginga Odinga Street, Kisumu",
-          creditLimit: money(820000),
-          overdueBalance: money(0),
-          notes: "Frequently buys Spark series and accessories."
-        }
-      })
-    ]);
-
-    await Promise.all(
-      [
-        {
-          name: "Order Confirmation",
-          channel: "Email",
-          triggerEvent: "ORDER_CONFIRMED",
-          subject: "Your phone order has been confirmed",
-          body: "We have confirmed your wholesale order and moved it to fulfillment."
-        },
-        {
-          name: "Invoice Issued",
-          channel: "Email",
-          triggerEvent: "INVOICE_ISSUED",
-          subject: "Your invoice is ready",
-          body: "The ERP has generated an invoice with tax and delivery breakdown."
-        },
-        {
-          name: "Payment Receipt",
-          channel: "Email",
-          triggerEvent: "PAYMENT_RECORDED",
-          subject: "Payment posted",
-          body: "We have posted your payment and updated the outstanding balance."
-        },
-        {
-          name: "Delivery Update",
-          channel: "SMS",
-          triggerEvent: "DELIVERY_IN_TRANSIT",
-          subject: null,
-          body: "Your order is on the way."
-        }
-      ].map((template) =>
-        tx.communicationTemplate.upsert({
-          where: { name: template.name },
-          update: {
-            channel: template.channel,
-            triggerEvent: template.triggerEvent,
-            subject: template.subject,
-            body: template.body
+      await Promise.all(
+        [
+          {
+            name: "Order Confirmation",
+            channel: "Email",
+            triggerEvent: "ORDER_CONFIRMED",
+            subject: "Your phone order has been confirmed",
+            body: "We have confirmed your wholesale order and moved it to fulfillment."
           },
-          create: template
-        })
-      )
-    );
+          {
+            name: "Invoice Issued",
+            channel: "Email",
+            triggerEvent: "INVOICE_ISSUED",
+            subject: "Your invoice is ready",
+            body: "The ERP has generated an invoice with tax and delivery breakdown."
+          },
+          {
+            name: "Payment Receipt",
+            channel: "Email",
+            triggerEvent: "PAYMENT_RECORDED",
+            subject: "Payment posted",
+            body: "We have posted your payment and updated the outstanding balance."
+          },
+          {
+            name: "Delivery Update",
+            channel: "SMS",
+            triggerEvent: "DELIVERY_IN_TRANSIT",
+            subject: null,
+            body: "Your order is on the way."
+          }
+        ].map((template) =>
+          tx.communicationTemplate.upsert({
+            where: { name: template.name },
+            update: {
+              channel: template.channel,
+              triggerEvent: template.triggerEvent,
+              subject: template.subject,
+              body: template.body
+            },
+            create: template
+          })
+        )
+      );
 
-    const salesUser =
-      (await tx.user.findFirst({ where: { role: "SALES", isActive: true } })) ??
-      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
-      actor;
-    const financeUser =
-      (await tx.user.findFirst({ where: { role: "FINANCE", isActive: true } })) ??
-      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
-      actor;
-    const warehouseUser =
-      (await tx.user.findFirst({ where: { role: "WAREHOUSE", isActive: true } })) ??
-      (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
-      actor;
-    const driver = await tx.staff.findFirst({
-      where: {
-        OR: [{ roleLabel: "DELIVERY" }, { roleLabel: "Delivery" }]
-      }
-    });
+      const salesUser =
+        (await tx.user.findFirst({ where: { role: "SALES", isActive: true } })) ??
+        (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+        actor;
+      const financeUser =
+        (await tx.user.findFirst({ where: { role: "FINANCE", isActive: true } })) ??
+        (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+        actor;
+      const warehouseUser =
+        (await tx.user.findFirst({ where: { role: "WAREHOUSE", isActive: true } })) ??
+        (await tx.user.findFirst({ where: { role: "ADMIN", id: actor.id } })) ??
+        actor;
+      const driver = await tx.staff.findFirst({
+        where: {
+          OR: [{ roleLabel: "DELIVERY" }, { roleLabel: "Delivery" }]
+        }
+      });
 
-    if ((await tx.order.count()) === 0) {
+      if ((await tx.order.count()) === 0) {
       const totals = computeTotals(
         [
           {
@@ -1795,9 +1796,9 @@ export async function populateStarterOperationalData(input: { userId: string }) 
         body: `Driver completed ${delivery.deliveryNumber} and captured customer signature for proof of delivery.`,
         status: "Sent"
       });
-    }
+      }
 
-    if ((await tx.payrollRun.count()) === 0) {
+      if ((await tx.payrollRun.count()) === 0) {
       const staff = await tx.staff.findMany({
         where: {
           user: { isActive: true }
@@ -1874,27 +1875,32 @@ export async function populateStarterOperationalData(input: { userId: string }) 
           status: "Prepared"
         });
       }
+      }
+
+      await addAudit(
+        tx,
+        input.userId,
+        "POPULATE_STARTER_DATA",
+        "System",
+        actor.id,
+        "Loaded non-destructive starter categories, products, customers, invoice flow, delivery proof, and payroll examples."
+      );
+
+      return {
+        categories: await tx.productCategory.count(),
+        customers: await tx.customer.count(),
+        products: await tx.product.count(),
+        orders: await tx.order.count(),
+        invoices: await tx.invoice.count(),
+        deliveries: await tx.delivery.count(),
+        payrollRuns: await tx.payrollRun.count()
+      };
+    },
+    {
+      maxWait: 10000,
+      timeout: 30000
     }
-
-    await addAudit(
-      tx,
-      input.userId,
-      "POPULATE_STARTER_DATA",
-      "System",
-      actor.id,
-      "Loaded non-destructive starter categories, products, customers, invoice flow, delivery proof, and payroll examples."
-    );
-
-    return {
-      categories: await tx.productCategory.count(),
-      customers: await tx.customer.count(),
-      products: await tx.product.count(),
-      orders: await tx.order.count(),
-      invoices: await tx.invoice.count(),
-      deliveries: await tx.delivery.count(),
-      payrollRuns: await tx.payrollRun.count()
-    };
-  });
+  );
 }
 
 export { roleHomeMap };
